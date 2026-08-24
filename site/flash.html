@@ -1,0 +1,86 @@
+<head>
+<meta charset="utf-8">
+<title>Flash firmware — X4 Print Inbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Flash the X4 Print Inbox firmware over USB from your browser using Web Serial.">
+<link rel="stylesheet" href="assets/style.css">
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+</head>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">X4 Print Inbox</a>
+    <nav class="site-nav">
+      <a href="index.html">Home</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="setup.html">Setup</a>
+      <a href="flash.html" aria-current="page">Flash firmware</a>
+      <a href="https://github.com/shelbeeely/x4-printer">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <h1>Flash the X4 firmware</h1>
+
+  <p>
+    This flashes the X4 firmware binary over USB, straight from your
+    browser, using the <a href="https://developer.chrome.com/docs/capabilities/serial">Web Serial API</a>.
+    It works in Chrome or Edge on desktop — not on mobile, not in Firefox
+    or Safari. Plug the X4 into your computer via USB before starting.
+    Web Serial also requires HTTPS, which GitHub Pages already provides.
+  </p>
+
+  <p>
+    Flashing firmware alone does not provision the SD card (Wi-Fi
+    credentials, device pairing). See <a href="setup.html">Setup</a> for
+    the rest of the device setup.
+  </p>
+
+  <div class="card">
+    <h2>Before you start</h2>
+    <ul>
+      <li>USB cable connected between the X4 and your computer.</li>
+      <li>Chrome or Edge, on desktop (not mobile).</li>
+      <li>Nothing else has the device's serial port open (close any serial
+        monitor or terminal connected to it).</li>
+    </ul>
+  </div>
+
+  <esp-web-install-button id="flash-widget" manifest="firmware/manifest.json">
+    <button slot="activate" class="btn btn-primary">Connect &amp; flash</button>
+    <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge on desktop.</span>
+    <span slot="not-allowed">Web Serial needs HTTPS. If you're seeing this on the live site, please open an issue.</span>
+  </esp-web-install-button>
+
+  <div class="card" id="flash-fallback" hidden>
+    <h2>Firmware isn't published yet</h2>
+    <p>Build and flash it yourself:</p>
+    <pre><code>cd firmware
+git clone https://github.com/Free-Ink/freeink-sdk
+pio run -e xteink_x4 -t upload</code></pre>
+    <p>
+      See
+      <a href="https://github.com/shelbeeely/x4-printer/blob/claude/xteink-print-inbox-system-6lh4v6/docs/setup-x4.md">docs/setup-x4.md</a>
+      for the full walkthrough, including SD card provisioning.
+    </p>
+  </div>
+
+  <script>
+    (function () {
+      var widget = document.getElementById('flash-widget');
+      var fallback = document.getElementById('flash-fallback');
+      fetch('firmware/manifest.json')
+        .then(function (res) {
+          if (!res.ok) throw new Error('manifest not found');
+        })
+        .catch(function () {
+          widget.hidden = true;
+          fallback.hidden = false;
+        });
+    })();
+  </script>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>MIT licensed. <a href="https://github.com/shelbeeely/x4-printer">Source on GitHub</a>.</p>
+  </div>
+</footer>
