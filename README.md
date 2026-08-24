@@ -1,5 +1,8 @@
 # X4 Print Inbox
 
+[![Tests](https://github.com/shelbeeely/x4-printer/actions/workflows/tests.yml/badge.svg)](https://github.com/shelbeeely/x4-printer/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Turns an [Xteink X4](https://www.xteink.com/) e-paper device into a
 wireless print inbox and offline approval terminal. A Raspberry Pi Zero W
 acts as a normal network printer that any OS's built-in print dialog can
@@ -46,6 +49,13 @@ the exact wire contract between the three components.
 | `tools/simulate_x4.py` | A fake X4 that speaks the real sync protocol, for exercising the whole pipeline without hardware |
 | `tests/integration/` | End-to-end tests running real server instances against the fake X4 client |
 | `docs/` | Architecture, protocol, format, and setup documentation |
+
+## Docs & flashing
+
+**Project site (with browser-based firmware flashing):**
+https://shelbeeely.github.io/x4-printer/ — this only goes live once the
+repo's GitHub Pages source is set to "GitHub Actions" in Settings (a
+one-time manual step).
 
 ## Quick start
 
