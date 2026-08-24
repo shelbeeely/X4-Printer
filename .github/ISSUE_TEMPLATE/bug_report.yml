@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in the firmware, Pi server, relay, or docs isn't working right.
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system is this about?
+      options:
+        - firmware
+        - pi-server
+        - relay
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What actually happened. Include exact error messages if you have them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps that trigger it. If it's not reliably reproducible, say so.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: firmware-version
+    attributes:
+      label: X4 firmware version
+      description: Only if this involves the X4/firmware. Leave blank otherwise.
+      placeholder: e.g. commit hash or version string shown on the device
+
+  - type: input
+    id: pi-os
+    attributes:
+      label: Pi OS
+      description: Only if this involves pi-server. Leave blank otherwise.
+      placeholder: e.g. Raspberry Pi OS Bookworm, 64-bit
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Only if this involves pi-server or relay. `python3 --version`.
+      placeholder: e.g. Python 3.11.2
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server output, firmware serial log, test output — whatever's relevant. Paste raw, don't screenshot.
+      render: shell

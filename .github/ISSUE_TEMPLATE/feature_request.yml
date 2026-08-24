@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose something new or a change to existing behavior.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What's missing or awkward right now? What are you trying to do that the project doesn't support well?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd want to happen. Sketch the interface/behavior if you have one in mind.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system does this touch?
+      options:
+        - firmware
+        - pi-server
+        - relay
+        - docs
+        - other / cross-cutting
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why you didn't go with them. "None" is fine.
