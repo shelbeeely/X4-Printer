@@ -1,0 +1,106 @@
+# Runs the project's four independent test suites (see README.md's
+# "Running the tests" section):
+#
+#   - pi-server-tests:   Pi server unit tests (pi-server/tests, pytest)
+#   - relay-tests:       Relay unit tests (relay/tests, pytest, stdlib only)
+#   - integration-tests: end-to-end tests (tests/integration) against real
+#                        IPP + sync API + relay servers, a fake CUPS `lp`,
+#                        and the same client library tools/simulate_x4.py
+#                        uses — needs pi-server's dependencies importable
+#   - firmware-host-tests: firmware's pure-logic modules built and run as
+#                        plain C++17 (firmware/test), no board required
+#
+# Each suite is a separate job so a failure is attributable to the right
+# component in the GitHub UI. CI installs dependencies directly into the
+# job's Python environment (each job is already an isolated container, so
+# the venv the README uses for local dev isn't needed here).
+#
+# Out of scope: building the actual device firmware (`pio run`), which
+# needs the external freeink-sdk checkout and the ESP32 toolchain — that
+# best-effort build lives in a separate workflow.
+name: Tests
+
+on:
+  push:
+    branches:
+      - claude/xteink-print-inbox-system-6lh4v6
+  pull_request:
+
+jobs:
+  pi-server-tests:
+    name: Pi server unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: pi-server
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run pytest
+        working-directory: pi-server
+        run: python -m pytest -q
+
+  relay-tests:
+    name: Relay unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Run pytest
+        working-directory: relay
+        run: python -m pytest -q
+
+  integration-tests:
+    name: End-to-end integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # tests/integration imports pi-server's code, so pi-server's own
+      # dependencies must be installed too, plus pytest at the repo root.
+      - name: Install dependencies
+        run: |
+          pip install -r pi-server/requirements.txt
+          pip install pytest
+
+      - name: Run pytest
+        run: python -m pytest tests/integration -q
+
+  firmware-host-tests:
+    name: Firmware host-side unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # cmake and a C++ compiler are preinstalled on ubuntu-latest runners;
+      # no GoogleTest fetch, no PlatformIO/ESP32 toolchain, no network
+      # needed for these pure-logic module tests.
+      - name: Configure
+        working-directory: firmware/test
+        run: cmake -B build
+
+      - name: Build
+        working-directory: firmware/test
+        run: cmake --build build
+
+      - name: Run ctest
+        working-directory: firmware/test
+        run: ctest --test-dir build --output-on-failure
