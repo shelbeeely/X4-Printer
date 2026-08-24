@@ -1,0 +1,162 @@
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+
+import pytest
+
+from xteink_print_server.config import Config
+from xteink_print_server.db import Database
+from xteink_print_server.sync_api import SyncApiServer
+from xteink_print_server.util import hash_token
+
+
+DEVICE_ID = "dev-test1"
+DEVICE_TOKEN = "supersecrettoken"
+
+
+def _insert_job(db: Database, config: Config, title="Doc") -> str:
+    xtc_path = config.xtc_dir / "job1.xtc"
+    xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
+    from xteink_print_server.util import sha256_file
+
+    original_path = config.originals_dir / "job1.pdf"
+    original_path.write_bytes(b"%PDF-fake-bytes")
+    return db.insert_job(
+        title=title,
+        source="ipp",
+        original_path=str(original_path),
+        original_mime="application/pdf",
+        original_bytes=original_path.stat().st_size,
+        xtc_path=str(xtc_path),
+        xtc_bytes=xtc_path.stat().st_size,
+        xtc_sha256=sha256_file(xtc_path),
+        page_count=1,
+    )
+
+
+@pytest.fixture
+def running_sync_api(config: Config, db: Database):
+    db.register_device(DEVICE_ID, hash_token(DEVICE_TOKEN), "Test Device", None)
+    config.sync_host = "127.0.0.1"
+    config.sync_port = 0
+    server = SyncApiServer(config, db)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}/api/v1", db, config
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+def _get(url, token=DEVICE_TOKEN, device=DEVICE_ID, headers=None):
+    h = {"Authorization": f"Bearer {token}", "X-Device-Id": device}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h)
+    return urllib.request.urlopen(req, timeout=5)
+
+
+def _post(url, body, token=DEVICE_TOKEN, device=DEVICE_ID):
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}", "X-Device-Id": device, "Content-Type": "application/json"},
+    )
+    return urllib.request.urlopen(req, timeout=5)
+
+
+def test_missing_auth_is_rejected(running_sync_api):
+    base, _db, _cfg = running_sync_api
+    req = urllib.request.Request(f"{base}/devices/{DEVICE_ID}/jobs")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 401
+
+
+def test_wrong_token_is_rejected(running_sync_api):
+    base, _db, _cfg = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/jobs", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_list_pending_jobs(running_sync_api):
+    base, db, config = running_sync_api
+    job_id = _insert_job(db, config)
+    resp = _get(f"{base}/devices/{DEVICE_ID}/jobs")
+    payload = json.loads(resp.read())
+    assert len(payload["jobs"]) == 1
+    assert payload["jobs"][0]["job_id"] == job_id
+
+
+def test_download_xtc_full_and_ranged(running_sync_api):
+    base, db, config = running_sync_api
+    job_id = _insert_job(db, config)
+    row = db.get_job(job_id)
+
+    resp = _get(f"{base}/jobs/{job_id}/xtc")
+    body = resp.read()
+    assert body == open(row["xtc_path"], "rb").read()
+    assert resp.headers["X-Content-SHA256"] == row["xtc_sha256"]
+
+    resp2 = _get(f"{base}/jobs/{job_id}/xtc", headers={"Range": "bytes=0-9"})
+    assert resp2.status == 206
+    assert len(resp2.read()) == 10
+
+
+def test_ack_marks_delivered_and_rejects_hash_mismatch(running_sync_api):
+    base, db, config = running_sync_api
+    job_id = _insert_job(db, config)
+    row = db.get_job(job_id)
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/jobs/{job_id}/ack", {"sha256": "wrong"})
+    assert exc.value.code == 409
+
+    resp = _post(f"{base}/jobs/{job_id}/ack", {"sha256": row["xtc_sha256"]})
+    assert json.loads(resp.read())["status"] == "ok"
+
+    pending = db.list_pending_jobs_for_device(DEVICE_ID)
+    assert pending == []
+
+
+def test_approval_print_is_idempotent_over_http(running_sync_api, fake_lp_binary):
+    base, db, config = running_sync_api
+    job_id = _insert_job(db, config)
+
+    body = {
+        "approval_id": "appr-http-1",
+        "device_id": DEVICE_ID,
+        "job_id": job_id,
+        "action": "print",
+        "created_at": 1737590000,
+    }
+    resp1 = json.loads(_post(f"{base}/approvals", body).read())
+    resp2 = json.loads(_post(f"{base}/approvals", body).read())
+
+    assert resp1["status"] == "applied"
+    assert resp1["detail"] == "printed"
+    assert resp2["status"] == "already_applied"
+
+    call_log = fake_lp_binary.log_path.read_text().strip().splitlines()
+    assert len(call_log) == 1
+
+
+def test_approval_device_mismatch_rejected(running_sync_api):
+    base, db, config = running_sync_api
+    job_id = _insert_job(db, config)
+    body = {
+        "approval_id": "appr-http-2",
+        "device_id": "someone-else",
+        "job_id": job_id,
+        "action": "keep",
+        "created_at": 1,
+    }
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/approvals", body)
+    assert exc.value.code == 403

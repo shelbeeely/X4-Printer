@@ -1,0 +1,5 @@
+# Kept deliberately small — a Pi Zero W has 512MB RAM shared with the OS,
+# CUPS, and avahi. No web framework: the IPP/sync servers use the stdlib
+# http.server directly (see ipp_server.py / sync_api.py docstrings).
+PyMuPDF>=1.23,<2.0
+Pillow>=10.0,<12.0

@@ -1,0 +1,34 @@
+This project is original code (MIT licensed, see LICENSE) built as a
+consumer of the FreeInk SDK and informed by three other open-source
+projects as architectural/API references. No source code from any of the
+projects below is copied into this repository — see docs/architecture.md
+for exactly what was reused (a library dependency, a wire format, and API
+usage patterns) versus written from scratch.
+
+- FreeInk SDK (https://github.com/Free-Ink/freeink-sdk, MIT License) —
+  firmware/ is built directly on this SDK as a PlatformIO library
+  dependency (EInkDisplay, SDCardManager, PowerManager, InputManager,
+  FreeInkUI). Not modified or forked; used as intended, as a dependency.
+
+- CrossPoint Reader (https://github.com/crosspoint-reader/crosspoint-reader) —
+  referenced for how to structure a real FreeInk-based application: its
+  PersistableStore (atomic JSON-on-SD persistence) and WifiCredentialStore
+  patterns are re-implemented from scratch in firmware/src/store/ and
+  firmware/src/config/ against the same design, and its HttpDownloader's
+  streaming-to-SD approach informed firmware/src/net/SyncClient.cpp's
+  design. No CrossPoint source is linked into this firmware.
+
+- paperlesspaper/paperlessprinter (https://github.com/paperlesspaper/paperlessprinter) —
+  referenced for its from-scratch IPP/1.1 wire-protocol implementation
+  (attribute encoding, Get-Printer-Attributes response shape, chunked HTTP
+  body handling) against a plain http.server, which
+  pi-server/xteink_print_server/ipp_server.py reimplements independently
+  for this project's narrower needs (see docs/architecture.md for what
+  differs).
+
+- phrozen/xtx (https://github.com/phrozen/xtx) — the reference for the
+  XTC/XTG/XTCH byte-layout specification (docs/xtc-format.md distills the
+  subset this project uses). Both this project's Python encoder
+  (pi-server/xteink_print_server/xtc_writer.py) and its C++ decoder
+  (firmware/src/xtc/XtcFormat.h) are from-scratch implementations against
+  that spec — neither links or vendors the xtx Go module.

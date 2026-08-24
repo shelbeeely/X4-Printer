@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# PlatformIO
+firmware/.pio/
+firmware/.cache/
+firmware/freeink-sdk/
+
+# C++ host test build
+firmware/test/build/
+
+# Local data / secrets — never commit a real deployment's state
+pi-server/data/
+*.db
+*.db-wal
+*.db-shm
+tls/
+*.pem
+!firmware/test/xtc_format/fixtures/*.pem
+device.json
+kitchen-x4.json
+
+# Editor/OS cruft
+.DS_Store
+*.swp

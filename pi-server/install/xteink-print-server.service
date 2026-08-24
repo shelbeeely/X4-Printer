@@ -1,0 +1,61 @@
+[Unit]
+Description=Xteink X4 print server (IPP receiver, sync API, relay client)
+After=network-online.target cups.service avahi-daemon.service
+Wants=network-online.target
+Requires=cups.service
+
+[Service]
+Type=simple
+User=xteink-print
+Group=lp
+ExecStart=/opt/xteink-print-server/.venv/bin/python -m xteink_print_server.server
+WorkingDirectory=/opt/xteink-print-server
+Restart=on-failure
+RestartSec=5
+
+# --- Storage layout -------------------------------------------------------
+Environment=XTEINK_DATA_DIR=/var/lib/xteink-print-server
+
+# --- IPP listener (what OS print dialogs talk to) --------------------------
+Environment=XTEINK_IPP_HOST=0.0.0.0
+Environment=XTEINK_IPP_PORT=6310
+Environment=XTEINK_PRINTER_NAME=Xteink X4
+Environment=XTEINK_RENDER_DPI=150
+
+# --- X4 sync API (device <-> Pi, TLS) --------------------------------------
+Environment=XTEINK_SYNC_HOST=0.0.0.0
+Environment=XTEINK_SYNC_PORT=8443
+Environment=XTEINK_TLS_CERT=/var/lib/xteink-print-server/tls/server.crt
+Environment=XTEINK_TLS_KEY=/var/lib/xteink-print-server/tls/server.key
+
+# --- X4 panel geometry ------------------------------------------------------
+Environment=XTEINK_PANEL_WIDTH=800
+Environment=XTEINK_PANEL_HEIGHT=480
+
+# --- Physical printer forwarding --------------------------------------------
+# Set this to the CUPS queue name for your real printer, e.g. `lpstat -p`
+# after running install.sh's CUPS setup step.
+Environment=XTEINK_CUPS_QUEUE=
+Environment=XTEINK_LP_BINARY=/usr/bin/lp
+
+# --- Cloud relay (optional; leave XTEINK_RELAY_URL empty to disable) -------
+# Fill these in with the output of relay/tools/create_account.py if you want
+# remote (away-from-home) approval support.
+Environment=XTEINK_RELAY_URL=
+Environment=XTEINK_RELAY_ACCOUNT_ID=
+Environment=XTEINK_RELAY_ACCOUNT_TOKEN=
+Environment=XTEINK_RELAY_POLL_INTERVAL=20
+Environment=XTEINK_RELAY_ALLOW_DOCUMENT_SYNC=false
+
+Environment=XTEINK_RETENTION_DAYS=30
+Environment=XTEINK_LOG_LEVEL=INFO
+
+# --- Hardening ----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/xteink-print-server
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

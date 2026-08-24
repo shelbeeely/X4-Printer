@@ -1,0 +1,3 @@
+# The relay is pure Python stdlib (http.server, sqlite3, ssl) — no
+# third-party dependencies, so it runs on whatever small VPS or container
+# the user points it at without a dependency install step at all.
