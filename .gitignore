@@ -27,3 +27,6 @@ kitchen-x4.json
 # Editor/OS cruft
 .DS_Store
 *.swp
+
+# Claude Code session state (agent worktrees, etc.)
+.claude/
