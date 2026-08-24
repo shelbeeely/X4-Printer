@@ -10,6 +10,7 @@ import logging
 import signal
 import threading
 
+from .admin_api import run_admin_api
 from .config import Config, load_config
 from .db import Database
 from .ipp_server import run_ipp_server
@@ -33,19 +34,36 @@ def main() -> None:
     if replayed:
         logger.warning("replayed %d approval(s) left unapplied by a previous run", replayed)
 
+    # Constructed before the listener threads (rather than after, as
+    # before) so it can be handed to the admin console, which needs a
+    # live reference to start/stop the poll thread when relay settings
+    # change (admin_api.py's _handle_post_settings).
+    relay = RelayClient(config, db)
+
     ipp_ready = threading.Event()
     sync_ready = threading.Event()
+    admin_ready = threading.Event()
 
     ipp_thread = threading.Thread(target=run_ipp_server, args=(config, db, ipp_ready), name="ipp-server", daemon=True)
     sync_thread = threading.Thread(target=run_sync_api, args=(config, db, sync_ready), name="sync-api", daemon=True)
     ipp_thread.start()
     sync_thread.start()
 
-    relay = RelayClient(config, db)
+    admin_thread = None
+    if config.admin_password:
+        admin_thread = threading.Thread(
+            target=run_admin_api, args=(config, db, relay, admin_ready), name="admin-api", daemon=True
+        )
+        admin_thread.start()
+    else:
+        logger.info("admin console disabled (XTEINK_ADMIN_PASSWORD not configured)")
+        admin_ready.set()
+
     relay.start()
 
     ipp_ready.wait(timeout=10)
     sync_ready.wait(timeout=10)
+    admin_ready.wait(timeout=10)
     logger.info("xteink print server ready")
 
     stop_event = threading.Event()

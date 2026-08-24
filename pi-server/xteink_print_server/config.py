@@ -4,13 +4,35 @@ Kept as plain env-var lookups (no config-file parser dependency) so the
 systemd unit in install/ is the single source of truth for a deployment:
 every setting is an ``Environment=`` line there, easy to audit and to
 override per-host without touching code.
+
+**Exception**: the small set of fields the admin web console
+(``admin_api.py``) can edit live (``cups_queue``, ``retention_days``, and
+the ``relay_*`` fields) are layered on top of env-var defaults from
+``<data_dir>/admin_settings.json`` at load time, and that file's values
+*win* over the environment — the mental model is "the GUI is the live
+control panel, env vars/systemd are just the initial defaults." Every
+other field (hosts, ports, TLS paths) stays env-var/systemd-only, since
+changing those live would require rebinding a socket. See
+``save_runtime_overrides`` below, called from ``admin_api.py``.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("xteink.config")
+
+# Guards read-modify-write of admin_settings.json: the admin API runs on a
+# ThreadingHTTPServer, so two concurrent settings POSTs could otherwise
+# each read the same on-disk dict before either writes, and the second
+# writer's save would silently clobber the first's (same class of problem
+# db.py's Database._write_lock exists to prevent for jobs.db).
+_SETTINGS_LOCK = threading.Lock()
 
 
 def _env_str(name: str, default: str) -> str:
@@ -76,6 +98,14 @@ class Config:
     # archived or deleted, so the Pi's SD card doesn't grow unbounded.
     retention_days: int = field(default_factory=lambda: _env_int("XTEINK_RETENTION_DAYS", 30))
 
+    # Admin web console (admin_api.py). Empty admin_password disables the
+    # listener entirely (server.py never starts the thread) — no
+    # accidental silent-open admin surface. TLS is reused from
+    # tls_cert/tls_key above when present, same as the sync API.
+    admin_host: str = field(default_factory=lambda: _env_str("XTEINK_ADMIN_HOST", "0.0.0.0"))
+    admin_port: int = field(default_factory=lambda: _env_int("XTEINK_ADMIN_PORT", 8090))
+    admin_password: str = field(default_factory=lambda: _env_str("XTEINK_ADMIN_PASSWORD", ""))
+
     log_level: str = field(default_factory=lambda: _env_str("XTEINK_LOG_LEVEL", "INFO"))
 
     @property
@@ -94,8 +124,73 @@ class Config:
         for d in (self.data_dir, self.originals_dir, self.xtc_dir, self.tls_cert.parent):
             d.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def admin_settings_path(self) -> Path:
+        return self.data_dir / "admin_settings.json"
+
+
+# Fields the admin console is allowed to edit live (see module docstring).
+# Everything else (hosts, ports, TLS paths, the admin password itself)
+# stays env-var/systemd-only.
+RUNTIME_OVERRIDABLE_FIELDS = {
+    "cups_queue",
+    "retention_days",
+    "relay_url",
+    "relay_account_id",
+    "relay_account_token",
+    "relay_poll_interval_seconds",
+    "relay_allow_document_sync",
+}
+
+
+def _apply_runtime_overrides(cfg: Config) -> None:
+    path = cfg.admin_settings_path
+    if not path.exists():
+        return
+    try:
+        overrides = json.loads(path.read_text())
+    except (OSError, ValueError):
+        logger.warning("could not read %s, ignoring saved admin settings", path)
+        return
+    for key, value in overrides.items():
+        if key in RUNTIME_OVERRIDABLE_FIELDS:
+            setattr(cfg, key, value)
+
+
+def save_runtime_overrides(cfg: Config, overrides: dict) -> None:
+    """Persists `overrides` to disk and applies them to `cfg` in place, so
+    every component holding a reference to this same Config instance
+    (sync_api, ipp_server, printer_forward, relay_client) sees the change
+    immediately with no restart. Only RUNTIME_OVERRIDABLE_FIELDS may be
+    set — the caller (admin_api.py) is expected to validate/coerce types
+    before calling this.
+
+    The file can hold relay_account_token in plaintext, so it's written
+    0600 (owner read/write only), same intent as
+    tools/gen_selfsigned_cert.py's handling of the TLS private key."""
+    unknown = set(overrides) - RUNTIME_OVERRIDABLE_FIELDS
+    if unknown:
+        raise ValueError(f"not a live-editable setting: {sorted(unknown)}")
+
+    path = cfg.admin_settings_path
+    with _SETTINGS_LOCK:
+        existing: dict = {}
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text())
+            except (OSError, ValueError):
+                existing = {}
+        existing.update(overrides)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(existing, indent=2) + "\n")
+        path.chmod(0o600)
+
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+
 
 def load_config() -> Config:
     cfg = Config()
     cfg.ensure_dirs()
+    _apply_runtime_overrides(cfg)
     return cfg

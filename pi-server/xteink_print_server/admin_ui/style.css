@@ -1,0 +1,183 @@
+:root {
+  --bg: #f5f5f4;
+  --fg: #1c1c1a;
+  --muted: #6b6b66;
+  --accent: #1d6f5c;
+  --accent-fg: #ffffff;
+  --card-bg: #ffffff;
+  --border: #ddddd8;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --fg: #eceae6;
+    --muted: #9a9a95;
+    --accent: #4fb99f;
+    --accent-fg: #0b1512;
+    --card-bg: #201f23;
+    --border: #35343a;
+    --danger: #ff8478;
+    --danger-bg: #3a1a18;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.wrap { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card-bg);
+  flex-wrap: wrap;
+}
+
+.brand { font-weight: 600; }
+.muted { color: var(--muted); font-weight: 400; }
+
+.tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+.tab-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active { color: var(--accent-fg); background: var(--accent); }
+
+h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+
+.hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 1rem; }
+.hint code { font-size: 0.85em; }
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+
+.banner {
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.banner-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-value { font-size: 1.6rem; font-weight: 600; }
+.stat-label { color: var(--muted); font-size: 0.82rem; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.88rem;
+}
+
+.data-table th, .data-table td {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.data-table th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table td.empty { color: var(--muted); text-align: center; padding: 1.25rem; }
+
+.row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+.btn {
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--fg);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 480px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.settings-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.88rem; }
+.settings-form input[type="text"],
+.settings-form input[type="number"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.9rem;
+}
+
+.settings-form fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-form legend { color: var(--muted); font-size: 0.82rem; padding: 0 0.3rem; }
+.checkbox-row { flex-direction: row !important; align-items: center; gap: 0.5rem !important; }

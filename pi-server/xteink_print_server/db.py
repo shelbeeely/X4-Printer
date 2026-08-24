@@ -7,8 +7,9 @@ without lock contention on ordinary reads.
 
 Idempotent approval application (docs/protocol.md §3) lives here as
 ``record_approval``/``mark_approval_applied`` rather than in the callers, so
-every caller (direct sync API, relay-drained approvals, a future admin CLI)
-gets the same atomicity guarantee for free.
+every caller (direct sync API, relay-drained approvals, and the admin web
+console's reprint/keep/archive actions — see ``admin_api.py``) gets the
+same atomicity guarantee for free.
 """
 
 from __future__ import annotations
@@ -257,3 +258,64 @@ class Database:
         applied — e.g. the process died between record_approval_if_new and
         mark_approval_applied. Replayed once at startup."""
         return self.query("SELECT * FROM approvals WHERE applied = 0 ORDER BY received_at ASC")
+
+    # -- Admin console ------------------------------------------------------
+    #
+    # Read/write helpers for admin_api.py. Kept pure-SQL like the rest of
+    # this file — file I/O for a job's original/xtc bytes (e.g. "purge")
+    # is the caller's responsibility, same division as convert.py/
+    # xtc_writer.py already owning file I/O outside db.py.
+
+    def list_jobs_for_admin(self) -> list[sqlite3.Row]:
+        return self.query(
+            """SELECT j.*,
+                      (SELECT COUNT(*) FROM job_deliveries d WHERE d.job_id = j.job_id) AS delivered_count,
+                      (SELECT a.action FROM approvals a
+                         WHERE a.job_id = j.job_id ORDER BY a.received_at DESC LIMIT 1) AS last_action
+               FROM jobs j
+               ORDER BY j.created_at DESC"""
+        )
+
+    def clear_deliveries_and_reset_status(self, job_id: str) -> None:
+        """"Requeue": forgets every device's delivery record for this job
+        and puts it back to 'pending', so it's redownloaded on the next
+        sync. Does not touch the job's files or its approval history."""
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM job_deliveries WHERE job_id = ?", (job_id,))
+            conn.execute("UPDATE jobs SET status = 'pending' WHERE job_id = ?", (job_id,))
+
+    def delete_job_row(self, job_id: str) -> None:
+        """"Purge": removes the job and its delivery records. Approval
+        history rows are left in place for audit (they reference job_id
+        but there's no FK constraint, so this is safe). Caller must
+        unlink the job's original/xtc files on disk first."""
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM job_deliveries WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+
+    def list_recent_approvals(self, limit: int = 50) -> list[sqlite3.Row]:
+        return self.query(
+            """SELECT a.*, j.title AS job_title
+               FROM approvals a
+               LEFT JOIN jobs j ON j.job_id = a.job_id
+               ORDER BY a.received_at DESC
+               LIMIT ?""",
+            (limit,),
+        )
+
+    # -- Devices (admin) ------------------------------------------------------
+
+    def list_devices(self) -> list[sqlite3.Row]:
+        return self.query("SELECT * FROM devices ORDER BY paired_at DESC")
+
+    def delete_device(self, device_id: str) -> None:
+        """"Revoke": the device's bearer token stops authenticating
+        immediately (sync_api._authenticate looks up the row by
+        device_id, so a missing row is an auth failure, same as an
+        unrecognized device today)."""
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+
+    def rotate_device_token(self, device_id: str, new_token_hash: str) -> None:
+        with self.transaction() as conn:
+            conn.execute("UPDATE devices SET token_hash = ? WHERE device_id = ?", (new_token_hash, device_id))

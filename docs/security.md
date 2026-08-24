@@ -13,6 +13,7 @@ model.
 [Pi]         --HTTPS, account bearer token, outbound only-->        [Relay]
 [X4, away]   --HTTPS, account bearer token, outbound only-->        [Relay]
 [Pi]         --local subprocess, fixed queue name-->                 [CUPS -> physical printer]
+[Admin browser, LAN] --HTTP Basic, shared password, opt. TLS--> [Pi: admin_api.py]
 ```
 
 ## IPP listener (`pi-server/xteink_print_server/ipp_server.py`)
@@ -46,6 +47,41 @@ same mitigation you'd apply to a physical printer.
   list or rotation flow in this prototype. A production deployment would
   want the Pi to serve a stable CA it can rotate leaf certs under, or a
   real DNS name + Let's Encrypt.
+
+## Admin web console (`admin_api.py`)
+
+- **Disabled by default.** `server.py` only starts the listener if
+  `XTEINK_ADMIN_PASSWORD` is set — an empty password means no listener at
+  all, not an open one. There's no separate "enable" flag to forget.
+- **Auth is a single shared HTTP Basic password**, compared with the same
+  constant-time comparison (`util.constant_time_eq`) the sync API uses for
+  bearer tokens — not per-user accounts, matching the project's existing
+  one-secret-per-surface simplicity. The password itself is never hashed
+  or persisted anywhere — it only ever lives in the process environment
+  (`admin_settings.json` is not used for it; only the fields listed in
+  `config.RUNTIME_OVERRIDABLE_FIELDS` are), so anyone who can read the
+  systemd unit or process environment can read it — same exposure as
+  `XTEINK_RELAY_ACCOUNT_TOKEN` today.
+- **TLS is reused, not separate**: if `tls_cert`/`tls_key` exist (the same
+  cert `sync_api.py` uses), the admin listener wraps its socket in TLS
+  too; otherwise it logs a warning and serves plaintext, same fallback
+  behavior as the sync API.
+- **Live-edited relay settings persist to `<data_dir>/admin_settings.json`**
+  (`config.save_runtime_overrides`), which can contain
+  `relay_account_token` in plaintext — that file is written `0600` (owner
+  only), same intent as the TLS private key
+  (`tools/gen_selfsigned_cert.py`).
+- **What a logged-in admin can do**: see every job's title/size/status and
+  every paired device's name, reprint/keep/archive/requeue/purge any job,
+  revoke or rotate any device's token, and edit `cups_queue`,
+  `retention_days`, and the relay fields live. This is meaningfully more
+  powerful than the sync API (which only ever acts on the one device
+  presenting a valid token for itself) — treat the admin password with at
+  least the same care as the relay account token, and don't port-forward
+  this any more than you would the sync API.
+- **No rate limiting or lockout** on repeated failed Basic-auth attempts —
+  same "no rate limiting" gap already documented below for the other
+  listeners, not something this feature adds beyond what already exists.
 
 ## Relay (see `docs/relay.md` for full detail)
 
