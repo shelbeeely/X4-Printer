@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Setup — X4 Print Inbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Condensed setup steps for the Pi print server and the X4 device, with links to the full walkthroughs.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">X4 Print Inbox</a>
+    <nav class="site-nav">
+      <a href="index.html">Home</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="setup.html" aria-current="page">Setup</a>
+      <a href="flash.html">Flash firmware</a>
+      <a href="https://github.com/shelbeeely/x4-printer">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <h1>Setup</h1>
+  <p>Two things to set up: the Pi print server, and the X4 device itself.</p>
+
+  <h2>1. Set up the Pi</h2>
+  <p>
+    Target: a Raspberry Pi (Zero W or better) running Raspberry Pi OS
+    Bookworm or newer, on the same LAN as the X4, with a physical
+    network/USB printer already reachable from it.
+  </p>
+  <pre><code>git clone &lt;this-repo&gt;
+cd X4-Printer/pi-server
+sudo ./install/install.sh</code></pre>
+  <p>
+    This installs CUPS, avahi-daemon, creates a <code>xteink-print</code>
+    system user, sets up a Python virtualenv, generates a self-signed TLS
+    certificate for the sync API, and starts the
+    <code>xteink-print-server</code> systemd service. After that you point
+    it at your CUPS queue (<code>XTEINK_CUPS_QUEUE</code>) and pair your
+    first X4 with <code>pair_device.py</code>, which produces the
+    <code>device.json</code> and CA cert files the X4 needs.
+  </p>
+  <div class="card">
+    <p>
+      Full walkthrough (CUPS printer config, mDNS troubleshooting, pairing,
+      end-to-end verification without hardware):
+      <a href="https://github.com/shelbeeely/x4-printer/blob/claude/xteink-print-inbox-system-6lh4v6/docs/setup-pi.md">docs/setup-pi.md</a>
+    </p>
+  </div>
+
+  <h2>2. Set up the X4</h2>
+  <pre><code>cd firmware
+git clone https://github.com/Free-Ink/freeink-sdk
+pio run -e xteink_x4
+pio run -e xteink_x4 -t upload</code></pre>
+  <p>
+    <a class="btn btn-primary" href="flash.html">Or flash from your browser — no toolchain needed</a>
+  </p>
+  <p>
+    Then provision a FAT32 microSD card with these files at its root:
+  </p>
+  <pre><code>/system/device.json      &lt;- from pi-server/tools/pair_device.py
+/system/pi_ca.pem        &lt;- pi-server's tls/server.crt
+/system/wifi.json        &lt;- hand-written, see docs/setup-x4.md</code></pre>
+  <p>
+    On first boot the firmware connects to the strongest saved Wi-Fi
+    network, runs one sync pass (nothing to download yet on a fresh
+    device), and opens the Print Inbox UI. If <code>device.json</code> is
+    missing or Wi-Fi isn't configured, the sync pass is a no-op and the
+    Inbox screen just shows "Inbox empty" until you've paired the device
+    and printed something.
+  </p>
+  <div class="card">
+    <p>
+      Full walkthrough (SD card provisioning details, using the Print
+      Inbox, remote approval, troubleshooting):
+      <a href="https://github.com/shelbeeely/x4-printer/blob/claude/xteink-print-inbox-system-6lh4v6/docs/setup-x4.md">docs/setup-x4.md</a>
+    </p>
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>MIT licensed. <a href="https://github.com/shelbeeely/x4-printer">Source on GitHub</a>.</p>
+  </div>
+</footer>
+</body>
+</html>
