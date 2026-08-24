@@ -1,0 +1,104 @@
+<title>X4 Print Inbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="X4 Print Inbox turns an Xteink X4 e-paper device into a wireless print inbox and offline approval terminal.">
+<link rel="stylesheet" href="assets/style.css">
+
+<!--
+  Shared header/footer markup (copy verbatim on every page; set
+  aria-current="page" on whichever nav link matches the current page):
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html">X4 Print Inbox</a>
+      <nav class="site-nav">
+        <a href="index.html">Home</a>
+        <a href="how-it-works.html">How it works</a>
+        <a href="setup.html">Setup</a>
+        <a href="flash.html">Flash firmware</a>
+        <a href="https://github.com/shelbeeely/x4-printer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    ...page content...
+  </main>
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>MIT licensed. <a href="https://github.com/shelbeeely/x4-printer">Source on GitHub</a>.</p>
+    </div>
+  </footer>
+-->
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">X4 Print Inbox</a>
+    <nav class="site-nav">
+      <a href="index.html" aria-current="page">Home</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="setup.html">Setup</a>
+      <a href="flash.html">Flash firmware</a>
+      <a href="https://github.com/shelbeeely/x4-printer">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>X4 Print Inbox</h1>
+    <p>
+      Turn an <a href="https://www.xteink.com/">Xteink X4</a> e-paper device
+      into a wireless print inbox and offline approval terminal. A Raspberry
+      Pi Zero W acts as a normal network printer that any OS's built-in
+      print dialog can find — no drivers, no app. The X4 downloads new
+      documents on wake, lets you read and approve or reject them fully
+      offline, and syncs the approval back once it has a connection again.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="flash.html">Flash the firmware</a>
+      <a class="btn" href="how-it-works.html">How it works</a>
+    </div>
+  </section>
+
+  <section>
+    <h2>How a print reaches you</h2>
+    <ol class="steps">
+      <li><span class="step-num">1</span> Print from any computer's normal print dialog</li>
+      <li><span class="step-num">2</span> The Raspberry Pi receives the job</li>
+      <li><span class="step-num">3</span> It retains the original and generates an XTC page for the X4</li>
+      <li><span class="step-num">4</span> The X4 wakes and downloads pending documents to its SD card</li>
+      <li><span class="step-num">5</span> The X4 goes back offline</li>
+      <li><span class="step-num">6</span> You read the document and approve or reject it, fully offline</li>
+      <li><span class="step-num">7</span> The approval is saved locally on the X4</li>
+      <li><span class="step-num">8</span> When the X4 next has internet access, the approval syncs to the home Pi — directly, or through the relay</li>
+      <li><span class="step-num">9</span> The Pi sends the original document to a physical network printer</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Design highlights</h2>
+    <div class="card-grid">
+      <div class="card">
+        <h3>Looks like a normal printer</h3>
+        <p>Speaks IPP/mDNS well enough for Windows, macOS, Linux, Android, and iOS's built-in driverless print paths — no app, no driver install.</p>
+      </div>
+      <div class="card">
+        <h3>Never loses a job or an approval</h3>
+        <p>Every durable write is atomic, and approvals are idempotent end-to-end, so retries and reboots can never cause a duplicate physical print.</p>
+      </div>
+      <div class="card">
+        <h3>Respects the memory budget</h3>
+        <p>Downloads and pages stream straight to and from SD — no full-document buffers anywhere in the ESP32-C3 firmware.</p>
+      </div>
+      <div class="card">
+        <h3>Deep sleep by default</h3>
+        <p>The X4 is never remotely wakeable. It wakes from a button press or its own timer, syncs, and goes back to sleep.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>MIT licensed. <a href="https://github.com/shelbeeely/x4-printer">Source on GitHub</a>.</p>
+  </div>
+</footer>
