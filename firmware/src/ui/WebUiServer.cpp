@@ -2,6 +2,8 @@
 
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <SDCardManager.h>
+#include <SdFat.h>
 #include <WiFi.h>
 
 #include <cstdio>
@@ -9,6 +11,7 @@
 #include <ctime>
 
 #include "net/WifiManager.h"
+#include "ui/XtcDecoderWasmData.h"
 #include "util/Random.h"
 
 namespace ui {
@@ -19,6 +22,10 @@ namespace {
 // screen-readable charset) from fwrand::randomHex() (util/Random.h,
 // shared with ui/InboxUI.cpp's approval-id generation), so they stay
 // local here rather than being folded into that shared helper.
+
+// Matches xtc::XtcReader.cpp's own kBulkChunkBytes — bounded RAM regardless
+// of job size, no full-file buffer.
+constexpr size_t kXtcStreamChunkBytes = 2048;
 
 void randomPin(char* out) {  // out must be 7 bytes
   uint32_t v = esp_random() % 1000000u;
@@ -119,6 +126,17 @@ async function refreshJobs() {
         b.onclick = () => act(j.job_id, pair[1]);
         div.appendChild(b);
       }
+      const canvas = document.createElement('canvas');
+      canvas.style.display = 'none';
+      canvas.style.maxWidth = '100%';
+      canvas.style.marginTop = '.5rem';
+      canvas.style.border = '1px solid var(--border)';
+      canvas.style.borderRadius = '10px';
+      const previewBtn = document.createElement('button');
+      previewBtn.textContent = 'Preview';
+      previewBtn.onclick = () => preview(j.job_id, canvas);
+      div.appendChild(previewBtn);
+      div.appendChild(canvas);
     }
     el.appendChild(div);
   }
@@ -127,6 +145,78 @@ async function act(jobId, action) {
   await fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({job_id: jobId, action: action})});
   refreshJobs();
+}
+
+// Client-side XTC decode (tools/xtc-wasm/), entirely offline once
+// xtc-decoder.js/.wasm are fetched from this device — no CDN, no external
+// libraries, matches the hotspot mode's no-internet-access constraint.
+let xtcModulePromise = null;
+function loadXtcModule() {
+  if (!xtcModulePromise) {
+    xtcModulePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/xtc-decoder.js';
+      script.onload = () => {
+        createXtcDecoderModule({locateFile: () => '/xtc-decoder.wasm'}).then(resolve, reject);
+      };
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  return xtcModulePromise;
+}
+async function preview(jobId, canvas) {
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  canvas.width = 200; canvas.height = 40;
+  ctx.font = '14px sans-serif';
+  ctx.fillText('Loading preview...', 4, 20);
+  let mod = null, inPtr = 0, widthPtr = 0, heightPtr = 0, outPtr = 0;
+  try {
+    // Independent I/O — overlap the module load with the file fetch
+    // instead of paying both latencies back-to-back.
+    const [loadedMod, r] = await Promise.all([
+      loadXtcModule(),
+      fetch('/api/jobs/xtc?job_id=' + encodeURIComponent(jobId)),
+    ]);
+    mod = loadedMod;
+    if (!r.ok) throw new Error('fetch failed');
+    const bytes = new Uint8Array(await r.arrayBuffer());
+
+    inPtr = mod._malloc(bytes.length);
+    widthPtr = mod._malloc(2);
+    heightPtr = mod._malloc(2);
+    if (!inPtr || !widthPtr || !heightPtr) throw new Error('out of memory');
+    mod.HEAPU8.set(bytes, inPtr);
+    outPtr = mod._xtc_decode_page(inPtr, bytes.length, 0, widthPtr, heightPtr);
+    if (outPtr === 0) throw new Error('decode failed');
+
+    const width = mod.HEAPU16[widthPtr >> 1];
+    const height = mod.HEAPU16[heightPtr >> 1];
+    const gray = mod.HEAPU8.subarray(outPtr, outPtr + width * height);
+    canvas.width = width;
+    canvas.height = height;
+    const imgData = ctx.createImageData(width, height);
+    for (let i = 0; i < width * height; i++) {
+      const v = gray[i];
+      imgData.data[i * 4] = v;
+      imgData.data[i * 4 + 1] = v;
+      imgData.data[i * 4 + 2] = v;
+      imgData.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    canvas.width = 200; canvas.height = 40;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillText('Preview unavailable.', 4, 20);
+  } finally {
+    if (mod) {
+      if (inPtr) mod._free(inPtr);
+      if (widthPtr) mod._free(widthPtr);
+      if (heightPtr) mod._free(heightPtr);
+      if (outPtr) mod._xtc_free(outPtr);
+    }
+  }
 }
 refreshStatus();
 refreshJobs();
@@ -207,6 +297,18 @@ void WebUiServer::beginCommon() {
     server_.on("/api/jobs", HTTP_POST, [this]() {
       markActivity();
       handleApiJobsPost();
+    });
+    server_.on("/api/jobs/xtc", HTTP_GET, [this]() {
+      markActivity();
+      handleApiJobXtc();
+    });
+    server_.on("/xtc-decoder.wasm", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcDecoderWasm();
+    });
+    server_.on("/xtc-decoder.js", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcDecoderJs();
     });
     server_.onNotFound([this]() {
       markActivity();
@@ -394,6 +496,67 @@ void WebUiServer::handleApiJobsPost() {
   String out;
   serializeJson(errDoc, out);
   server_.send(code, "application/json", out);
+}
+
+void WebUiServer::handleApiJobXtc() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  if (jobs_ == nullptr) {
+    server_.send(500, "application/json", "{\"error\":\"not ready\"}");
+    return;
+  }
+
+  String jobId = server_.arg("job_id");
+  const store::JobEntry* entry = jobs_->find(jobId.c_str());
+  if (entry == nullptr) {
+    server_.send(404, "application/json", "{\"error\":\"unknown_job\"}");
+    return;
+  }
+
+  FsFile file = SdMan.open(entry->xtcPath, O_RDONLY);
+  if (!file) {
+    server_.send(500, "application/json", "{\"error\":\"io_error\"}");
+    return;
+  }
+
+  // Streamed straight from SD in bounded chunks (never a whole-file
+  // buffer), same reasoning as xtc::XtcReader.cpp's own bulk-copy path —
+  // the client (tools/xtc-wasm/xtc_decoder.cpp, via kJobListPageHtml's
+  // preview button) does its own parsing/bounds-checking on these raw
+  // bytes, same as any other untrusted input.
+  server_.setContentLength(entry->xtcBytes);
+  server_.send(200, "application/octet-stream", "");
+
+  uint8_t buf[kXtcStreamChunkBytes];
+  uint32_t remaining = entry->xtcBytes;
+  while (remaining > 0) {
+    size_t toRead = remaining < sizeof(buf) ? remaining : sizeof(buf);
+    int n = file.read(buf, toRead);
+    if (n <= 0) break;  // io error mid-stream; client sees a short body and treats decode as failed
+    server_.sendContent(reinterpret_cast<const char*>(buf), static_cast<size_t>(n));
+    remaining -= static_cast<uint32_t>(n);
+  }
+  file.close();
+}
+
+void WebUiServer::handleXtcDecoderWasm() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  server_.setContentLength(kXtcDecoderWasmLen);
+  server_.send(200, "application/wasm", "");
+  server_.sendContent(reinterpret_cast<const char*>(kXtcDecoderWasm), kXtcDecoderWasmLen);
+}
+
+void WebUiServer::handleXtcDecoderJs() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  server_.send(200, "application/javascript", kXtcDecoderJs);
 }
 
 void WebUiServer::handleNotFound() { server_.send(404, "text/plain", "Not found"); }

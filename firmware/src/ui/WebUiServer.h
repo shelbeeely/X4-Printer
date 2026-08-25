@@ -20,6 +20,12 @@
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 
+// Also serves tools/xtc-wasm/'s compiled WASM decoder (embedded via
+// ui/XtcDecoderWasmData.h) and a raw-bytes route for a job's XTC file, so
+// the job list page can decode and preview a page entirely client-side —
+// see ui/WebUiServer.cpp's kJobListPageHtml script for the fetch/decode
+// glue.
+
 namespace ui {
 
 enum class WebUiMode { Off, Station, Hotspot };
@@ -107,6 +113,9 @@ class WebUiServer {
   void handleApiStatus();
   void handleApiJobsGet();
   void handleApiJobsPost();
+  void handleApiJobXtc();
+  void handleXtcDecoderWasm();
+  void handleXtcDecoderJs();
   void handleNotFound();
 };
 
