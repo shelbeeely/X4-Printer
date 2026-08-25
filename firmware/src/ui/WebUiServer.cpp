@@ -36,10 +36,25 @@ constexpr const char* kLoginPageHtml =
     R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>X4 Print Inbox</title>
-<style>body{font-family:sans-serif;max-width:320px;margin:3rem auto;padding:0 1rem}
-input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box}
-button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem}</style></head>
-<body><h1>X4 Print Inbox</h1><p>Enter the PIN shown on the device screen.</p>
+<style>
+:root{
+  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
+  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
+    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
+header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:1rem}
+header h1{margin:0;font-size:1.3rem;font-weight:700}
+input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:8px}
+button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:8px;font-weight:600}
+</style></head>
+<body><header><h1>X4 Print Inbox</h1></header><p>Enter the PIN shown on the device screen.</p>
 <form method="POST" action="/login">
 <input name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus>
 <button type="submit">Unlock</button></form></body></html>)HTML";
@@ -49,13 +64,27 @@ constexpr const char* kJobListPageHtml =
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>X4 Print Inbox</title>
 <style>
-body{font-family:sans-serif;max-width:480px;margin:1rem auto;padding:0 1rem}
-.job{border:1px solid #ccc;border-radius:8px;padding:.75rem;margin:.5rem 0}
+:root{
+  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
+  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
+    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
+header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.75rem}
+header h1{margin:0;font-size:1.3rem;font-weight:700}
+.job{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
 .job h3{margin:0 0 .25rem;font-size:1rem}
-.job button{margin-right:.4rem;padding:.4rem .7rem}
-#status{color:#666;font-size:.85rem}
+.job button{margin-right:.4rem;padding:.4rem .7rem;border-radius:8px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg)}
+.job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
+#status{color:var(--muted);font-size:.85rem}
 </style></head><body>
-<h1>Print Inbox</h1>
+<header><h1>Print Inbox</h1></header>
 <p id="status">Loading...</p>
 <div id="jobs"></div>
 <script>
@@ -249,7 +278,17 @@ void WebUiServer::handleLogin() {
   // docs/security.md "On-device Web UI" for why that's an accepted
   // tradeoff here (same class of documented gap as the Pi's own APIs).
   if (server_.arg("pin") != String(pin_)) {
-    server_.send(401, "text/html", "<p>Wrong PIN. <a href=\"/\">Try again</a>.</p>");
+    server_.send(401, "text/html",
+                 "<style>:root{--bg:#fff;--fg:#1a1a1a;--danger:#b3261e;--danger-bg:#fdecea;"
+                 "color-scheme:light dark}"
+                 "@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#eef0f3;"
+                 "--danger:#ff8478;--danger-bg:#3a1a18}}"
+                 "body{background:var(--bg);color:var(--fg);font-family:-apple-system,"
+                 "BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,"
+                 "'Apple Color Emoji','Segoe UI Emoji';max-width:320px;margin:3rem auto;"
+                 "padding:0 1rem}</style>"
+                 "<p style=\"color:var(--danger);background:var(--danger-bg);padding:.75rem;"
+                 "border-radius:8px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
     return;
   }
   String cookie = String("session=") + sessionToken_ + "; Path=/; HttpOnly";
