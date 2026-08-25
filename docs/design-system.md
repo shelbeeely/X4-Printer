@@ -16,13 +16,12 @@ moving between them (marketing site → pairing a device via the Pi console →
 approving a print from their phone against the X4's own hotspot) should read
 them as one product.
 
-The GitHub Pages site's stylesheet (`site/assets/style.css`) was chosen as
-the canonical source rather than inventing a fourth palette: of the three, it
-is the most complete and the most deliberately designed. This document is
-that canonical spec, reverse-engineered from the site's existing values plus
-two small extensions the Pi console already needed. It exists so future
-changes to *any* of the three surfaces have one place to check instead of
-three files silently diverging again.
+This doc previously specified a blue, system-font palette lifted from the
+GitHub Pages site. It's superseded here by a retro-70s orange design system —
+mustard/rust/brown tones, a display + body font pairing, pill-shaped buttons,
+and a small set of CSS-only entrance/hover animations — rolled out to all
+three surfaces at once so none of them drift from the others. There is still
+one canonical spec (this doc); only its content changed.
 
 ## Color tokens
 
@@ -31,68 +30,94 @@ dark)`:
 
 ```css
 :root {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #5a6270;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
-  --card-bg: #f6f7f9;
-  --border: #e0e2e7;
-  --danger: #b3261e;
-  --danger-bg: #fdecea;
+  --bg: #f7ecd1;
+  --card-bg: #fdf6e3;
+  --border: #e0c99a;
+  --fg: #3a2115;
+  --muted: #8a6f4e;
+  --accent: #e17a25;
+  --accent-fg: #2a1608;
+  --gold: #e19d25;
+  --accent2: #bd361e;
+  --sage: #6b7048;
+  --danger: #bd361e;
+  --danger-bg: #f6ded6;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161a;
-    --fg: #eef0f3;
-    --muted: #9aa2b1;
-    --accent: #6ea8fe;
-    --accent-fg: #ffffff;
-    --card-bg: #1c1f26;
-    --border: #2c3038;
-    --danger: #ff8478;
-    --danger-bg: #3a1a18;
+    --bg: #1c1109;
+    --card-bg: #3a2314;
+    --border: #5c3a1f;
+    --fg: #f3e3c4;
+    --muted: #b89878;
+    --accent: #e17a25;
+    --accent-fg: #2a1608;
+    --gold: #e19d25;
+    --accent2: #bd361e;
+    --sage: #8f9463;
+    --danger: #ff6a47;
+    --danger-bg: #3a1810;
   }
 }
 ```
 
-- `--bg`, `--fg`, `--muted`, `--accent`, `--card-bg`, `--border` are the
-  GitHub Pages site's own existing values, unchanged.
-- `--accent-fg`, `--danger`, `--danger-bg` are extensions the site doesn't
-  need yet but the Pi admin console does (primary-button text, error
-  banners). They're kept at the Pi console's pre-existing values since they
-  don't conflict with the shared accent and already read well against it.
+`--accent` (mustard-orange) is the interactive/primary color; `--gold` is a
+secondary accent used for stat values and step numbers — not for primary
+buttons. `--accent2` and `--sage` (a brick-red and a muted green) are
+reserved tertiary accents: declared in every surface's token set for
+parity, but not yet consumed via `var()` anywhere. The header divider's
+second wave is visually the same brick-red as `--accent2`, but it's a
+hardcoded hex inside an inline SVG data URI (custom properties can't be
+referenced from a data: URI), so keep that hex in sync with `--accent2` by
+hand if either changes. `--danger`/`--danger-bg` cover error banners and
+the X4's wrong-PIN page; note the dark-mode `--danger` is a brighter
+`#ff6a47` rather than the light-mode `#bd361e` — reusing the light value in
+dark mode reads at under 3:1 contrast against the dark card/background
+tones, well short of WCAG AA.
 
 ## Typography
 
-One font stack across all three surfaces, taken verbatim from the GitHub
-Pages site:
+Two-face pairing, loaded via Google Fonts:
 
 ```css
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-  Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+@import url(https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap);
 ```
 
-System fonts only — no webfont or CDN dependency anywhere. This isn't just a
-site-level preference: the X4's hotspot mode has zero internet access, so any
-surface that pulled a webfont would simply fail to render it. The constraint
-applies project-wide.
+- **"Boogaloo"** — display face, used only on brand marks and headings
+  (`.brand`, `h1`–`h4`). Never for body copy or UI controls; it's a bold
+  condensed display face, not a text face.
+- **"Nunito Sans"** — everything else (body copy, buttons, form labels,
+  table text). Falls back to the previous system-font stack
+  (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+  sans-serif, "Apple Color Emoji", "Segoe UI Emoji"`) if the webfont hasn't
+  loaded.
+
+This is a deliberate change from the previous system-fonts-only rule. The
+X4's hotspot mode still has zero internet access, so the `@import`/`<link>`
+simply fails there — both pages fall back to the system stack, which is
+still legible and still on-brand-adjacent (the fallback stack is the same
+one the old blue system used). Nothing on the X4 depends on the webfont
+loading successfully; it's a progressive enhancement available whenever the
+device is in station mode (joined to a real, internet-connected network).
 
 ## Radius scale
 
 | Element | Radius |
 |---|---|
-| Buttons | 8px |
-| Cards / panels | 10px |
-| Inline code / pills | 4px |
+| Buttons | 999px (pill) |
+| Cards / panels | 16px |
+| Inline code / small controls (inputs, fieldsets) | 6–14px, context-dependent |
 
-Applied everywhere — not varied per surface.
+Buttons are always fully pill-shaped regardless of surface. Cards/panels are
+always 16px. Smaller structural elements (text inputs, `<code>`, fieldsets)
+use a proportionally smaller radius in the same rounded family rather than a
+fixed value — see each surface's stylesheet for its exact per-element radii.
 
 ## Structural borders
 
-Every card, panel, and header bar uses `1px solid var(--border)`. Never a
-heavier weight, never a different color.
+Every card, panel, and header-adjacent divider uses `1px solid
+var(--border)`. Never a heavier weight, never a different color.
 
 ## Buttons
 
@@ -102,8 +127,9 @@ heavier weight, never a different color.
 background: var(--accent);
 border: 1px solid var(--accent);
 color: var(--accent-fg);
-border-radius: 8px;
+border-radius: 999px;
 font-weight: 600;
+animation: ctaGlow 2.5s ease-in-out infinite;
 ```
 
 **Secondary:**
@@ -112,11 +138,14 @@ font-weight: 600;
 background: var(--card-bg);
 border: 1px solid var(--border);
 color: var(--fg);
-border-radius: 8px;
+border-radius: 999px;
 font-weight: 600;
+transition: border-color .15s ease, transform .1s ease;
 ```
 
-Secondary hover: `border-color: var(--accent)`.
+Secondary hover: `border-color: var(--accent)`. Both primary and secondary
+buttons scale down slightly on press (`transform: scale(.96–.97)` on
+`:active`) for tactile feedback.
 
 Padding and font-size may vary by context — a Pi admin-table row action is
 compact, an X4 mobile page button is full-width, a site marketing CTA is
@@ -127,25 +156,54 @@ large. Color, radius, weight, and border do not vary by context.
 ```css
 background: var(--card-bg);
 border: 1px solid var(--border);
-border-radius: 10px;
-box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+border-radius: 16px;
+box-shadow: 0 1px 2px rgba(58, 33, 21, 0.08);
 ```
 
-## Header bars
+## Header bars and the wavy divider
 
-Wherever a surface has a header bar: `border-bottom: 1px solid var(--border)`,
-brand/title text `font-weight: 700`, flex row layout — the same visual family
-as the site's `.site-header`. This applies even on a surface with no
-multi-page nav: the X4 has a single screen, so its header bar just gets the
-same border/weight treatment applied to its title, with no nav links to add.
+Every surface's header bar gets a two-tone wavy SVG divider along its bottom
+edge instead of a plain border — a repeating background-image data URI
+(gold wave layered over a translucent rust wave), animated with a slow
+horizontal `waveBob` drift:
+
+```css
+@keyframes waveBob {
+  0%, 100% { background-position-x: 0; }
+  50% { background-position-x: 20px; }
+}
+```
+
+Brand/title text uses the Boogaloo display face (see Typography above)
+rather than a bare weight bump. This applies even on a surface with no
+multi-page nav: the X4 has a single screen, so its header just gets the same
+wave-divider + display-font title treatment, with no nav links to add.
+
+## Motion
+
+Three shared keyframe animations, CSS-only (no animation library — see
+`docs/design-system.md`'s reasoning below and `tools/xtc-wasm/README.md`
+for why the X4's *other* enhancement, client-side document preview, needed
+a real library/WASM but this one doesn't):
+
+- **`fadeInUp`** — entrance animation for cards, stat tiles, and page
+  sections (`opacity`/`translateY(10–14px)` → resting state), staggered by
+  ~0.05–0.06s per sibling where multiple cards enter together (stat grids,
+  card grids).
+- **`waveBob`** — the header divider's slow horizontal drift, above.
+- **`ctaGlow`** — a soft pulsing `box-shadow` on primary buttons only.
+
+CSS animations were sufficient for this goal (no library needed); the X4's
+other WASM work is a genuinely separate problem (decoding binary print data),
+described in `tools/xtc-wasm/README.md`.
 
 ## Implemented by
 
 | Surface | File | Notes |
 |---|---|---|
-| GitHub Pages site | `site/assets/style.css` | Canonical source of the shared tokens. Currently on the unmerged PR branch `site/pages-shell-and-home`, not yet on the branch this doc lives on. |
-| Pi admin console | `pi-server/xteink_print_server/admin_ui/style.css` | |
-| X4 on-device web UI | `firmware/src/ui/WebUiServer.cpp` | Inline `<style>` blocks inside `kLoginPageHtml` and `kJobListPageHtml`. |
+| GitHub Pages site | `site/assets/style.css` | Canonical source of the shared tokens (font `@import` lives here; all four site pages share this one file). |
+| Pi admin console | `pi-server/xteink_print_server/admin_ui/style.css` | Font `@import` at the top of the stylesheet, same as the site. |
+| X4 on-device web UI | `firmware/src/ui/WebUiServer.cpp` | Inline `<style>` blocks inside `kLoginPageHtml` and `kJobListPageHtml`, each with a non-blocking font `<link>` pair (`rel="preload"` + a `media="print"`/`onload` swap, so a stalled fetch in hotspot mode can't hold up first paint) in place of the `@import` the other two surfaces use. The wrong-PIN error page in `handleLogin()` is a bare `<style>`/`<p>` fragment with no `<head>` of its own — it has no font `<link>` and simply renders in the fallback stack. |
 
 There is no shared build system tying these three together — different
 languages, different deployments, no bundler or imported stylesheet linking

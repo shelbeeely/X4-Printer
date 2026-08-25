@@ -43,23 +43,29 @@ constexpr const char* kLoginPageHtml =
     R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>X4 Print Inbox</title>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
 <style>
 :root{
-  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
-  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
+  --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
+  --accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6;
   color-scheme:light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root{
-    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
-    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
+    --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
+    --accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810;
   }
 }
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
-header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:1rem}
-header h1{margin:0;font-size:1.3rem;font-weight:700}
-input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:8px}
-button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:8px;font-weight:600}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes waveBob{0%,100%{background-position-x:0}50%{background-position-x:20px}}
+@keyframes ctaGlow{0%,100%{box-shadow:0 0 0 rgba(225,122,37,0)}50%{box-shadow:0 0 14px rgba(225,122,37,.55)}}
+body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg);animation:fadeInUp .4s ease-out both}
+header{padding-bottom:.75rem;margin-bottom:1rem;position:relative}
+header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:8px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='16' viewBox='0 0 40 16'%3E%3Cpath d='M0 8 Q10 0 20 8 T40 8 V16 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 11 Q10 4 20 11 T40 11 V16 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 16px;animation:waveBob 3s ease-in-out infinite}
+input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:16px}
+button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:999px;font-weight:600;animation:ctaGlow 2.5s ease-in-out infinite}
 </style></head>
 <body><header><h1>X4 Print Inbox</h1></header><p>Enter the PIN shown on the device screen.</p>
 <form method="POST" action="/login">
@@ -70,24 +76,31 @@ constexpr const char* kJobListPageHtml =
     R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>X4 Print Inbox</title>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
 <style>
 :root{
-  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
-  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
+  --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
+  --accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6;
   color-scheme:light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root{
-    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
-    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
+    --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
+    --accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810;
   }
 }
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
-header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.75rem}
-header h1{margin:0;font-size:1.3rem;font-weight:700}
-.job{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes waveBob{0%,100%{background-position-x:0}50%{background-position-x:20px}}
+body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
+header{padding-bottom:.75rem;margin-bottom:.75rem;position:relative}
+header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:8px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='16' viewBox='0 0 40 16'%3E%3Cpath d='M0 8 Q10 0 20 8 T40 8 V16 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 11 Q10 4 20 11 T40 11 V16 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 16px;animation:waveBob 3s ease-in-out infinite}
+.job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
 .job h3{margin:0 0 .25rem;font-size:1rem}
-.job button{margin-right:.4rem;padding:.4rem .7rem;border-radius:8px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg)}
+.job button{margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);transition:border-color .15s ease,transform .1s ease}
+.job button:hover{border-color:var(--accent)}
+.job button:active{transform:scale(.96)}
 .job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
 #status{color:var(--muted);font-size:.85rem}
 </style></head><body>
@@ -381,16 +394,16 @@ void WebUiServer::handleLogin() {
   // tradeoff here (same class of documented gap as the Pi's own APIs).
   if (server_.arg("pin") != String(pin_)) {
     server_.send(401, "text/html",
-                 "<style>:root{--bg:#fff;--fg:#1a1a1a;--danger:#b3261e;--danger-bg:#fdecea;"
+                 "<style>:root{--bg:#f7ecd1;--fg:#3a2115;--danger:#bd361e;--danger-bg:#f6ded6;"
                  "color-scheme:light dark}"
-                 "@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#eef0f3;"
-                 "--danger:#ff8478;--danger-bg:#3a1a18}}"
-                 "body{background:var(--bg);color:var(--fg);font-family:-apple-system,"
+                 "@media (prefers-color-scheme:dark){:root{--bg:#1c1109;--fg:#f3e3c4;"
+                 "--danger:#ff6a47;--danger-bg:#3a1810}}"
+                 "body{background:var(--bg);color:var(--fg);font-family:\"Nunito Sans\",-apple-system,"
                  "BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,"
                  "'Apple Color Emoji','Segoe UI Emoji';max-width:320px;margin:3rem auto;"
                  "padding:0 1rem}</style>"
                  "<p style=\"color:var(--danger);background:var(--danger-bg);padding:.75rem;"
-                 "border-radius:8px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
+                 "border-radius:16px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
     return;
   }
   String cookie = String("session=") + sessionToken_ + "; Path=/; HttpOnly";
