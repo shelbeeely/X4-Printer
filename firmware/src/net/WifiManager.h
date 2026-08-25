@@ -27,6 +27,17 @@ class WifiManager {
 
   bool isConnected() const;
   String currentSsid() const;
+  String currentIp() const;  // station-mode IP, e.g. for the web UI's status screen
+
+  // Broadcasts this device's own hotspot (WiFi.softAP) — for the on-device
+  // web UI's "mobile, no known network in range" mode (ui/WebUiServer.h).
+  // Unlike connect(), this deliberately does NOT consult WifiStore: it's
+  // an explicit, user-toggled alternative to joining a known network, not
+  // part of the normal sync-window Wi-Fi flow. Default AP gateway
+  // (192.168.4.1) — no custom softAPConfig, same "deliberately minimal"
+  // style as connect()/disconnect() above.
+  bool startAccessPoint(const char* ssid, const char* password);
+  void stopAccessPoint();
 };
 
 }  // namespace net

@@ -1,12 +1,17 @@
 #include "testutil.h"
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "store/ApprovalOutbox.h"
 
 using store::ApprovalAction;
 using store::ApprovalEntry;
 using store::ApprovalOutboxIndex;
+using store::EnqueueResult;
+using store::JobEntry;
+using store::JobIndex;
+using store::JobStatus;
 using store::kMaxOutboxEntries;
 
 namespace {
@@ -18,6 +23,14 @@ ApprovalEntry makeEntry(int n, const char* jobId, ApprovalAction action) {
   e.action = action;
   e.createdAt = 1737590000 + n;
   e.synced = false;
+  return e;
+}
+
+JobEntry makeJob(const char* jobId, const char* title) {
+  JobEntry e;
+  std::snprintf(e.jobId, sizeof(e.jobId), "%s", jobId);
+  std::snprintf(e.title, sizeof(e.title), "%s", title);
+  e.status = JobStatus::Downloaded;
   return e;
 }
 
@@ -84,6 +97,74 @@ int main() {
   CHECK(partial.count() == 1);
   CHECK(!partial.at(0).synced);
   CHECK(std::strncmp(partial.at(0).approvalId, b.approvalId, sizeof(b.approvalId)) == 0);
+
+  // enqueueApproval() — the shared function ui/InboxUI.cpp (physical
+  // buttons) and ui/WebUiServer.cpp (on-device web UI) both call, so it's
+  // the one place this durable-before-network sequence needs to be right.
+  {
+    JobIndex jobs;
+    jobs.upsert(makeJob("job-web-aaaaaaaaaaaaaaaaaaaaaaaa", "Invoice"));
+    ApprovalOutboxIndex ob;
+
+    // Unknown job: nothing mutated.
+    EnqueueResult r = store::enqueueApproval(jobs, ob, "job-does-not-exist-aaaaaaaaaaaaa", ApprovalAction::Print,
+                                              "approval-1-aaaaaaaaaaaaaaaaaaaaa", 1000);
+    CHECK(r == EnqueueResult::UnknownJob);
+    CHECK(ob.count() == 0);
+
+    // Ok: job transitions status, outbox gets exactly one durable entry
+    // carrying the caller-supplied id/timestamp unchanged.
+    r = store::enqueueApproval(jobs, ob, "job-web-aaaaaaaaaaaaaaaaaaaaaaaa", ApprovalAction::Print,
+                                "approval-2-aaaaaaaaaaaaaaaaaaaaa", 2000);
+    CHECK(r == EnqueueResult::Ok);
+    CHECK(ob.count() == 1);
+    CHECK(jobs.find("job-web-aaaaaaaaaaaaaaaaaaaaaaaa")->status == JobStatus::ApprovedPrint);
+    CHECK(std::strcmp(ob.at(0).approvalId, "approval-2-aaaaaaaaaaaaaaaaaaaaa") == 0);
+    CHECK(ob.at(0).createdAt == 2000);
+    CHECK(ob.at(0).action == ApprovalAction::Print);
+
+    // Already pending: a second action on the same job before the first
+    // syncs is rejected, not silently queued as a contradictory action.
+    r = store::enqueueApproval(jobs, ob, "job-web-aaaaaaaaaaaaaaaaaaaaaaaa", ApprovalAction::Delete,
+                                "approval-3-aaaaaaaaaaaaaaaaaaaaa", 3000);
+    CHECK(r == EnqueueResult::AlreadyPending);
+    CHECK(ob.count() == 1);  // unchanged
+
+    // Outbox full: a different, unblocked job is still rejected once the
+    // outbox has no capacity left.
+    ApprovalOutboxIndex fullOb;
+    JobIndex manyJobs;
+    for (size_t i = 0; i < kMaxOutboxEntries; i++) {
+      char jobId[33];
+      std::snprintf(jobId, sizeof(jobId), "job-full-%023zu", i);
+      manyJobs.upsert(makeJob(jobId, "Doc"));
+      fullOb.append(makeEntry(static_cast<int>(i), jobId, ApprovalAction::Keep));
+    }
+    CHECK(fullOb.full());
+    manyJobs.upsert(makeJob("job-overflow-aaaaaaaaaaaaaaaaaaa", "Overflow"));
+    r = store::enqueueApproval(manyJobs, fullOb, "job-overflow-aaaaaaaaaaaaaaaaaaa", ApprovalAction::Keep,
+                                "approval-overflow-aaaaaaaaaaaaaa", 4000);
+    CHECK(r == EnqueueResult::OutboxFull);
+    CHECK(fullOb.count() == kMaxOutboxEntries);  // unchanged
+    CHECK(manyJobs.find("job-overflow-aaaaaaaaaaaaaaaaaaa")->status == JobStatus::Downloaded);  // unchanged
+  }
+
+  // parseApprovalAction() — the inverse of approvalActionName(), used by
+  // ui/WebUiServer.cpp to parse the web UI's POST /api/jobs body.
+  {
+    ApprovalAction a;
+    CHECK(store::parseApprovalAction("print", a) && a == ApprovalAction::Print);
+    CHECK(store::parseApprovalAction("keep", a) && a == ApprovalAction::Keep);
+    CHECK(store::parseApprovalAction("delete", a) && a == ApprovalAction::Delete);
+    CHECK(!store::parseApprovalAction("reprint", a));
+    CHECK(!store::parseApprovalAction("", a));
+    // Round-trips with approvalActionName() for every action value.
+    for (ApprovalAction action : {ApprovalAction::Print, ApprovalAction::Keep, ApprovalAction::Delete}) {
+      ApprovalAction roundTripped;
+      CHECK(store::parseApprovalAction(store::approvalActionName(action), roundTripped));
+      CHECK(roundTripped == action);
+    }
+  }
 
   std::printf("ApprovalOutboxTest: all assertions passed\n");
   return 0;

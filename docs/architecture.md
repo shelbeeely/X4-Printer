@@ -206,6 +206,36 @@ the *next* wake, keeping Wi-Fi off for the rest of the interactive session —
 woken" both hold: nothing above requires an inbound connection to the X4 at
 any point.
 
+## On-device Web UI (opt-in)
+
+Everything above holds for normal operation. `ui/WebUiServer.h`/`.cpp` adds
+one deliberate, scoped exception: a manual "Web UI" button on the Inbox
+screen's footer that lets you check/manage the queue from a phone browser
+without touching the physical buttons — useful when the device is out of
+easy reach, or (hotspot mode) away from any known network entirely.
+
+- **Explicit, not automatic.** Pressing the button shows a choice — "Use
+  Wi-Fi" (joins a saved network via the same `WifiManager::connect()` the
+  normal sync pass uses) or "Use Hotspot" (`WifiManager::startAccessPoint()`
+  broadcasts the device's own SoftAP) — never a silent fallback between
+  them, so a brief home-Wi-Fi drop can't unexpectedly turn the device into
+  a public hotspot.
+- **Gated by a fresh PIN.** Every time it's turned on, a new 6-digit PIN is
+  generated and shown on the e-ink screen; the phone enters it once
+  (`POST /login`) and gets a random session cookie for the rest of that
+  toggle-on session. Plain HTTP, no TLS — see `docs/security.md` "On-device
+  Web UI" for why that's an accepted tradeoff here.
+- **Reuses the real approval path.** `POST /api/jobs` on the phone goes
+  through the exact same `store::enqueueApproval()` (`ApprovalOutbox.h`)
+  the physical action menu uses — durable-outbox-entry-before-any-network-
+  attempt, the same idempotent guarantees, not a parallel implementation.
+- **Bounded exposure window.** The server and whichever radio mode is
+  active are torn down by the same idle timer that governs the rest of the
+  UI (`main.cpp`'s `kIdleSleepTimeoutMs`) — an actively-browsing phone's
+  periodic status poll counts as activity, an idle one doesn't, and
+  `goToSleep()` defensively stops the web UI before every deep sleep
+  regardless of how it was left running.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,
@@ -218,6 +248,7 @@ the FreeInk display framebuffer, and application code. Concretely:
 | SD download | 2,048 B chunk buffer | `SyncClient::downloadJobToSd()` streams HTTP→SD in fixed chunks; SHA-256 state is ~200 B, not proportional to file size |
 | Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~4KB typical) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
 | Wi-Fi + TLS (esp_http_client/mbedTLS) | ~40-60KB while connected | Only resident during the sync window (steps 2-8 above); torn down before deep sleep |
+| Web UI (Wi-Fi/SoftAP + `WebServer`, no TLS) | Similar order of magnitude to the sync-window Wi-Fi row above, minus the TLS overhead | Optional — only resident while the "On-device Web UI" feature is manually toggled on; torn down by the same idle timer as the rest of the UI, never during normal (button/timer-wake) operation |
 
 No component ever holds a full downloaded document, a full XTC file, or more
 than one rendered page in RAM at once — the one and only large fixed buffer
@@ -240,3 +271,8 @@ project.
   (`pi-server/install/install.sh`); `printer_forward.py` only ever shells
   out to `lp -d <configured-queue>`, never to an arbitrary queue name
   supplied by a request.
+- **On-device Web UI**: off by default, manually toggled, PIN-gated, plain
+  HTTP (no TLS) — see "On-device Web UI (opt-in)" above and
+  `docs/security.md` for the full tradeoff writeup. Unlike everything else
+  in this list, this one *does* accept an inbound connection — deliberately
+  and only while a person has just turned it on.

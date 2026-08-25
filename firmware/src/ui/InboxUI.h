@@ -27,6 +27,7 @@
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 #include "sync/SyncManager.h"
+#include "ui/WebUiServer.h"
 #include "xtc/XtcReader.h"
 
 namespace freeink_display {
@@ -42,12 +43,24 @@ enum class ScreenMode {
   Reader,    // paging through the selected document
   ActionMenu,  // Print / Keep / Delete / Cancel for the selected document
   Status,    // last sync result / pairing status
+  WebUiChoice,  // "Use Wi-Fi" / "Use Hotspot" / "Cancel" — entry point for the on-device web UI
+  WebUi,        // web UI is running: shows connection info + PIN + Stop
 };
 
 struct InboxUiState {
   store::JobIndex* jobs = nullptr;
   store::ApprovalOutboxIndex* outbox = nullptr;
   const config::DeviceConfigData* deviceConfig = nullptr;
+
+  // On-device web UI (ui/WebUiServer.h) — see docs/architecture.md
+  // "On-device Web UI". A plain member (not a pointer): its own
+  // jobs/outbox/deviceConfig pointers are wired via attach() in
+  // initApp(), the same post-construction pattern the fields above use.
+  WebUiServer webUiServer;
+  // Set inside the ActionWebUiChoiceRowSelect handler (InboxUI.cpp) on a
+  // failed startStation()/startHotspot(); webUiChoiceScreen() shows it
+  // once, then clears it.
+  const char* webUiStartError = nullptr;
 
   ScreenMode mode = ScreenMode::Inbox;
   int16_t selectedJobIndex = -1;

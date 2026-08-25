@@ -60,6 +60,14 @@ void runSyncPass() {
 }
 
 void goToSleep() {
+  // Nothing else tears down an on-device web UI session (started outside
+  // the normal sync flow, see ui/WebUiServer.h) before deep sleep —
+  // without this, an AP/STA radio left up by that feature would still be
+  // "on" across the sleep transition. Safe no-op if it was never started.
+  if (uiState.webUiServer.isActive()) {
+    uiState.webUiServer.stop();
+  }
+
   // Persist one more time before sleeping, defensively — SyncManager and
   // the UI action handlers already save after every mutation, so this is
   // normally a no-op write, not a load-bearing final flush.
@@ -150,6 +158,17 @@ void loop() {
     runSyncPass();
     app->invalidate(freeink::ui::RefreshHint::Full);
     lastActivityMs = millis();
+  }
+
+  // On-device web UI (ui/WebUiServer.h): service at most the currently
+  // pending request each pass, and treat a phone actually using the page
+  // (its periodic /api/status poll) as activity — same idle timer as
+  // physical button presses, no separate timeout for this mode.
+  if (uiState.mode == ui::ScreenMode::WebUi && uiState.webUiServer.isActive()) {
+    uiState.webUiServer.handleClient();
+    if (uiState.webUiServer.consumeActivityFlag()) {
+      lastActivityMs = millis();
+    }
   }
 
   if (millis() - lastActivityMs > kIdleSleepTimeoutMs) {

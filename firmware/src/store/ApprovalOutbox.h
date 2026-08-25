@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "store/IdTypes.h"
+#include "store/JobStore.h"
 
 namespace store {
 
@@ -28,6 +29,28 @@ inline const char* approvalActionName(ApprovalAction a) {
       return "delete";
   }
   return "keep";
+}
+
+// Inverse of approvalActionName(), for parsing the on-device web UI's
+// POST /api/jobs body (ui/WebUiServer.cpp) — same "print"/"keep"/"delete"
+// wire vocabulary docs/protocol.md defines for the Pi sync API, so both
+// approval sources speak the identical action strings. Returns false (out
+// left unchanged) for anything else, so callers reject an unrecognized
+// action explicitly rather than defaulting to Keep.
+inline bool parseApprovalAction(const char* s, ApprovalAction& out) {
+  if (std::strcmp(s, "print") == 0) {
+    out = ApprovalAction::Print;
+    return true;
+  }
+  if (std::strcmp(s, "keep") == 0) {
+    out = ApprovalAction::Keep;
+    return true;
+  }
+  if (std::strcmp(s, "delete") == 0) {
+    out = ApprovalAction::Delete;
+    return true;
+  }
+  return false;
 }
 
 struct ApprovalEntry {
@@ -117,5 +140,57 @@ class ApprovalOutboxIndex {
 // JobStore.h for the same load/save split rationale.
 bool loadApprovalOutbox(ApprovalOutboxIndex& outbox);
 bool saveApprovalOutbox(const ApprovalOutboxIndex& outbox);
+
+enum class EnqueueResult {
+  Ok,
+  UnknownJob,      // jobId isn't in `jobs` — nothing to approve
+  AlreadyPending,  // an unsynced approval already exists for this job
+  OutboxFull,      // see kMaxOutboxEntries / ApprovalOutboxIndex::full()
+};
+
+// The one place "queue an approval" happens: transitions the job's status
+// in `jobs` and appends a durable outbox entry, in that order, matching
+// the "durable before any network attempt" invariant this file's header
+// comment describes. `approvalId`/`createdAt` are supplied by the caller
+// (SoC-specific esp_random()/time() — see ui/InboxUI.cpp's generateId()/
+// nowEpoch()) rather than generated in here, so this function stays
+// freestanding/host-testable like the rest of this header — both the
+// physical-button UI (ui/InboxUI.cpp) and the on-device web UI
+// (ui/WebUiServer.cpp) call this exact same function, never a
+// re-implementation of it.
+//
+// Does not touch SD storage — callers persist jobs/outbox themselves
+// (store::saveJobIndex/saveApprovalOutbox) only on an Ok result, same as
+// today's behavior.
+inline EnqueueResult enqueueApproval(JobIndex& jobs, ApprovalOutboxIndex& outbox, const char* jobId,
+                                      ApprovalAction action, const char* approvalId, uint32_t createdAt) {
+  JobEntry* job = jobs.find(jobId);
+  if (job == nullptr) return EnqueueResult::UnknownJob;
+  if (outbox.hasPendingForJob(jobId)) return EnqueueResult::AlreadyPending;
+  if (outbox.full()) return EnqueueResult::OutboxFull;
+
+  ApprovalEntry entry;
+  std::strncpy(entry.approvalId, approvalId, sizeof(entry.approvalId) - 1);
+  std::strncpy(entry.jobId, jobId, sizeof(entry.jobId) - 1);
+  entry.action = action;
+  entry.createdAt = createdAt;
+  entry.synced = false;
+  outbox.append(entry);  // can't fail: full() already checked above
+
+  JobStatus newStatus = JobStatus::Downloaded;
+  switch (action) {
+    case ApprovalAction::Print:
+      newStatus = JobStatus::ApprovedPrint;
+      break;
+    case ApprovalAction::Keep:
+      newStatus = JobStatus::ApprovedKeep;
+      break;
+    case ApprovalAction::Delete:
+      newStatus = JobStatus::ApprovedDelete;
+      break;
+  }
+  jobs.setStatus(jobId, newStatus);
+  return EnqueueResult::Ok;
+}
 
 }  // namespace store

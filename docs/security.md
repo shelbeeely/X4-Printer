@@ -14,6 +14,7 @@ model.
 [X4, away]   --HTTPS, account bearer token, outbound only-->        [Relay]
 [Pi]         --local subprocess, fixed queue name-->                 [CUPS -> physical printer]
 [Admin browser, LAN] --HTTP Basic, shared password, opt. TLS--> [Pi: admin_api.py]
+[Phone, LAN or X4's own hotspot] --HTTP, fresh PIN + session cookie, no TLS--> [X4: ui/WebUiServer.cpp]
 ```
 
 ## IPP listener (`pi-server/xteink_print_server/ipp_server.py`)
@@ -47,6 +48,45 @@ same mitigation you'd apply to a physical printer.
   list or rotation flow in this prototype. A production deployment would
   want the Pi to serve a stable CA it can rotate leaf certs under, or a
   real DNS name + Let's Encrypt.
+
+## On-device Web UI (`firmware/src/ui/WebUiServer.h`/`.cpp`)
+
+This is the one place in the whole system that departs from "the X4 never
+accepts inbound connections" (`docs/architecture.md`'s wake sequence) —
+deliberately, and only for as long as a person has just turned it on from
+the physical UI.
+
+- **Off unless explicitly toggled on**, and torn down by the same idle
+  timer that governs the rest of the on-device UI
+  (`main.cpp`'s `kIdleSleepTimeoutMs`) — there is no way for this listener
+  to stay up across a deep sleep cycle; `goToSleep()` stops it
+  unconditionally before every sleep.
+- **A fresh 6-digit PIN, shown on the e-ink screen, gates every session.**
+  This is meaningfully weaker than the Pi admin console's password (a
+  6-digit PIN is 1,000,000 possibilities, not attacker-chosen-length) and
+  is **not rate-limited** — a scripted attacker already on the same
+  network (home Wi-Fi mode) or already holding the hotspot password
+  (hotspot mode) could brute-force it in a reasonably short time. This is
+  an accepted, documented tradeoff for a device with no keyboard and a
+  tiny e-ink screen, not an oversight — the actual gate in hotspot mode is
+  really the WPA2 password (also freshly generated, shown on-screen,
+  never persisted), with the PIN as a second, weaker layer on top.
+- **Plain HTTP, no TLS.** Same reasoning as the IPP listener: adding a
+  self-signed cert story to an ephemeral, manually-toggled, single-client
+  embedded listener is disproportionate. Traffic (job titles, print/keep/
+  delete actions) is visible to anyone who could already reach the
+  listener under the point above.
+- **Session token is the real credential**, not the PIN itself: `/login`
+  only ever checks the PIN once and then issues a 128-bit random
+  `esp_random()`-backed cookie; that token, not the PIN, is what every
+  subsequent request actually needs to present. The PIN's weakness above
+  is about *getting* a valid session, not about the session mechanism
+  itself.
+- **Actions reuse the Pi-side idempotency story too**: every approval
+  queued from the phone goes through `store::enqueueApproval()`
+  (`firmware/src/store/ApprovalOutbox.h`), the exact same durable-outbox
+  path the physical buttons use, so it inherits the same
+  `docs/protocol.md` §3 guarantees once it eventually syncs to the Pi.
 
 ## Admin web console (`admin_api.py`)
 
@@ -120,6 +160,9 @@ metadata).
   rendering is CPU-bound; PyMuPDF has its own hardening against malformed
   PDFs, but resource exhaustion via a very large legitimate-looking PDF is
   not specifically guarded against beyond `convert.py`'s `MAX_PAGE_COUNT`).
+  The on-device Web UI's PIN has the same gap — see "On-device Web UI"
+  above for why that one is a deliberately accepted tradeoff rather than
+  an omission.
 - **No per-account rate limiting on the relay** — see `docs/relay.md`
   "Multi-tenancy" for what a public deployment would need to add.
 - **Wi-Fi credential storage is obfuscation, not encryption**
