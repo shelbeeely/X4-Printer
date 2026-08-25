@@ -91,7 +91,33 @@ the resulting files to the X4's SD card (see `docs/setup-x4.md`):
 
 See `docs/relay.md`.
 
-## 7. Verify end-to-end without hardware
+## 7. (Optional) Admin web console
+
+A dashboard for jobs/devices/approvals, plus live-editable CUPS queue,
+retention, and relay settings — disabled unless you set a password:
+
+```sh
+sudo systemctl edit xteink-print-server.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment=XTEINK_ADMIN_PASSWORD=<a strong password>
+```
+
+```sh
+sudo systemctl restart xteink-print-server.service
+```
+
+Then open `http://<pi-host>:8090/` (or `https://` once the TLS cert from
+step 2 exists, which it will after a normal install) and log in with any
+username and that password — the browser's own login prompt handles it.
+See `docs/security.md` "Admin web console" for exactly what it can do and
+its trust model before exposing it beyond your own LAN.
+
+## 8. Verify end-to-end without hardware
 
 `tools/simulate_x4.py` (repo root) acts as a fake X4 over the same sync
 protocol the firmware uses — handy for confirming the whole pipeline

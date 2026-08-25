@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import ssl
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
@@ -21,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 from .config import Config
 from .db import Database
 from .printer_forward import apply_approval
-from .util import constant_time_eq, hash_token
+from .util import constant_time_eq, hash_token, serve_with_optional_tls
 
 logger = logging.getLogger("xteink.sync_api")
 
@@ -268,19 +267,4 @@ class SyncApiServer(ThreadingHTTPServer):
 
 def run_sync_api(config: Config, db: Database, ready_event=None) -> None:
     server = SyncApiServer(config, db)
-    if config.tls_cert.exists() and config.tls_key.exists():
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(certfile=str(config.tls_cert), keyfile=str(config.tls_key))
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        server.socket = ctx.wrap_socket(server.socket, server_side=True)
-        logger.info("sync API listening on https://%s:%d", config.sync_host, config.sync_port)
-    else:
-        logger.warning(
-            "TLS cert/key not found at %s / %s — sync API running WITHOUT TLS. "
-            "Run pi-server/tools/gen_selfsigned_cert.py before exposing this beyond localhost.",
-            config.tls_cert,
-            config.tls_key,
-        )
-    if ready_event is not None:
-        ready_event.set()
-    server.serve_forever()
+    serve_with_optional_tls(server, config, "sync API", ready_event)

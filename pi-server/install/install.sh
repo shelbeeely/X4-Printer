@@ -117,4 +117,13 @@ echo "4. (Optional) Enable remote approval: see docs/relay.md, then set"
 echo "   XTEINK_RELAY_URL/XTEINK_RELAY_ACCOUNT_ID/XTEINK_RELAY_ACCOUNT_TOKEN"
 echo "   the same way as step 2."
 echo
+echo "5. (Optional) Enable the admin web console (dashboard, job/device"
+echo "   management, live settings) by setting a password:"
+echo "     sudo systemctl edit xteink-print-server.service"
+echo "     # add: [Service]\\nEnvironment=XTEINK_ADMIN_PASSWORD=<a strong password>"
+echo "     sudo systemctl restart xteink-print-server.service"
+echo "   then open http://$(hostname -I 2>/dev/null | awk '{print $1}'):8090/"
+echo "   (or https:// once tls/server.crt exists, generated in step above)."
+echo "   Leave XTEINK_ADMIN_PASSWORD unset to keep it disabled."
+echo
 echo "\"$PRINTER_NAME\" should now appear in print dialogs on your LAN."

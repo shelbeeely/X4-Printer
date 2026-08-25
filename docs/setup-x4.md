@@ -98,7 +98,34 @@ ever lighting the screen — see `docs/architecture.md`'s wake sequence.
 Both intervals are compile-time constants; adjust and reflash if you want a
 different cadence.
 
-## 5. Remote approval away from home
+## 5. Using the Web UI
+
+The Inbox screen's footer has a **Web UI** button for checking/managing
+the queue from a phone browser without touching the physical buttons —
+see `docs/architecture.md` "On-device Web UI" for the design, and
+`docs/security.md`'s section of the same name for the full tradeoff
+writeup (short version: it's off unless you turn it on, PIN-gated, plain
+HTTP, and shuts itself off on the same idle timer as everything else).
+
+1. Press **Web UI** on the Inbox screen, then choose:
+   - **Use Wi-Fi** — joins a network from your saved credentials, same as
+     a normal sync. Fails with "No known Wi-Fi network in range" if none
+     is visible; use Hotspot instead.
+   - **Use Hotspot** — broadcasts the device's own network (SSID/password
+     shown on screen, freshly generated each time) so a phone can connect
+     directly with no router involved.
+2. The screen then shows a URL and a 6-digit PIN. On your phone: connect
+   to the shown network (skip this for Wi-Fi mode if you're already on
+   it), open the URL in a browser, and enter the PIN once.
+3. From there: view the queue, and tap Print/Keep/Delete on any job — it
+   queues the same durable approval the physical action menu would,
+   synced to the Pi on the device's next wake (or immediately if you also
+   hit Sync Now on the device itself).
+4. **Stop** (footer button on the Web UI screen) ends the session
+   immediately; otherwise it ends on its own after ~90 seconds of no
+   activity from the phone, same idle timer as the rest of the UI.
+
+## 6. Remote approval away from home
 
 Once `docs/relay.md` is set up and `device.json` includes the relay fields
 (re-run `pair_device.py`, or hand-edit the JSON to add
@@ -108,7 +135,7 @@ Pi's direct sync API isn't reachable on the current network — no separate
 "remote mode" toggle to remember. See `firmware/src/sync/SyncManager.cpp`'s
 `drainApprovalOutbox()`.
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 - **Inbox stays empty after printing**: confirm the Pi's CUPS queue is
   configured and the print actually completed on the sending computer's
@@ -124,3 +151,6 @@ Pi's direct sync API isn't reachable on the current network — no separate
   hostname/IP changed, see `pi-server/tools/gen_selfsigned_cert.py`) and
   that the Pi's `xteink-print-server` service is running
   (`systemctl status xteink-print-server`).
+- **Web UI won't load / wrong PIN**: the PIN and hotspot password are
+  regenerated every time you press Web UI — use the one currently shown
+  on the device screen, not one from an earlier session.

@@ -50,6 +50,12 @@ Environment=XTEINK_RELAY_ALLOW_DOCUMENT_SYNC=false
 Environment=XTEINK_RETENTION_DAYS=30
 Environment=XTEINK_LOG_LEVEL=INFO
 
+# --- Admin web console (optional; leave XTEINK_ADMIN_PASSWORD empty to
+# disable it entirely — no listener starts without a password set) ---------
+Environment=XTEINK_ADMIN_HOST=0.0.0.0
+Environment=XTEINK_ADMIN_PORT=8090
+Environment=XTEINK_ADMIN_PASSWORD=
+
 # --- Hardening ----------------------------------------------------------
 NoNewPrivileges=true
 PrivateTmp=true

@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "store/AtomicJsonFile.h"
+#include "util/Random.h"
 
 namespace ui {
 
@@ -21,6 +22,10 @@ enum : freeink::ui::ActionId {
   ActionCancelMenu = 6,
   ActionSyncNow = 7,
   ActionMenuRowSelect = 8,
+  ActionOpenWebUiChoice = 9,
+  ActionWebUiChoiceRowSelect = 10,
+  ActionWebUiStop = 11,
+  ActionCancelWebUiChoice = 12,
 };
 
 const char* statusGlyph(store::JobStatus status) {
@@ -85,8 +90,9 @@ void homeScreen(App::ScreenType& screen, void* userPtr) {
   const freeink::ui::FooterAction footer[] = {
       {.label = "Open", .action = ActionOpenJob},
       {.label = "Sync Now", .action = ActionSyncNow},
+      {.label = "Web UI", .action = ActionOpenWebUiChoice},
   };
-  screen.footer(footer, 2);
+  screen.footer(footer, 3);
 
   if (count == 0) {
     screen.popup("Inbox empty. Print something from any computer on your network, then wake this device.");
@@ -119,6 +125,57 @@ void actionMenuScreen(App::ScreenType& screen, void* userPtr) {
 
   const freeink::ui::FooterAction footer[] = {
       {.label = "Cancel", .action = ActionCancelMenu},
+  };
+  screen.footer(footer, 1);
+}
+
+// Entry point for the on-device web UI (docs/architecture.md "On-device
+// Web UI") — an explicit choice between joining the home Wi-Fi or
+// broadcasting this device's own hotspot, not a silent fallback between
+// them (see ui/WebUiServer.h's header comment for why). Same
+// list-of-options idiom as actionMenuScreen above.
+void webUiChoiceScreen(App::ScreenType& screen, void* userPtr) {
+  auto& state = *static_cast<InboxUiState*>(userPtr);
+
+  screen.header("Web UI", state.webUiStartError ? state.webUiStartError : "View the queue from a phone");
+  state.webUiStartError = nullptr;  // shown once
+
+  freeink::ui::ListItem items[3] = {
+      {.label = "Use Wi-Fi", .actionValue = 0},
+      {.label = "Use Hotspot", .actionValue = 1},
+      {.label = "Cancel", .actionValue = 2},
+  };
+  static int16_t selected = 0;
+  screen.list(items, 3, selected, ActionWebUiChoiceRowSelect);
+
+  const freeink::ui::FooterAction footer[] = {
+      {.label = "Cancel", .action = ActionCancelWebUiChoice},
+  };
+  screen.footer(footer, 1);
+}
+
+// Shown while the web UI is running: connection info + the fresh PIN the
+// phone must enter, and a Stop button. main.cpp's loop() keeps calling
+// state.webUiServer.handleClient() while state.mode == ScreenMode::WebUi
+// (see docs/architecture.md).
+void webUiScreen(App::ScreenType& screen, void* userPtr) {
+  auto& state = *static_cast<InboxUiState*>(userPtr);
+
+  char subtitle[96];
+  if (state.webUiServer.mode() == WebUiMode::Hotspot) {
+    std::snprintf(subtitle, sizeof(subtitle), "Hotspot: %s / %s", state.webUiServer.ssid(), state.webUiServer.password());
+  } else {
+    std::snprintf(subtitle, sizeof(subtitle), "Wi-Fi: %s", state.webUiServer.ssid());
+  }
+  screen.header("Web UI running", subtitle);
+
+  char body[128];
+  std::snprintf(body, sizeof(body), "On your phone, open http://%s/ and enter PIN %s",
+                state.webUiServer.address().c_str(), state.webUiServer.pin());
+  screen.popup(body);
+
+  const freeink::ui::FooterAction footer[] = {
+      {.label = "Stop", .action = ActionWebUiStop},
   };
   screen.footer(footer, 1);
 }
@@ -170,6 +227,12 @@ void screenRouter(App::ScreenType& screen, void* userPtr) {
     case ScreenMode::ActionMenu:
       actionMenuScreen(screen, userPtr);
       return;
+    case ScreenMode::WebUiChoice:
+      webUiChoiceScreen(screen, userPtr);
+      return;
+    case ScreenMode::WebUi:
+      webUiScreen(screen, userPtr);
+      return;
     case ScreenMode::Inbox:
     case ScreenMode::Status:
     default:
@@ -180,57 +243,28 @@ void screenRouter(App::ScreenType& screen, void* userPtr) {
 
 uint32_t nowEpoch() { return static_cast<uint32_t>(time(nullptr)); }
 
-// Generates a uuid4-hex-shaped id from the ESP32 hardware RNG
-// (esp_random(), true entropy — not a PRNG seeded from millis()). Good
-// enough uniqueness for an approval_id: it only needs to never collide
-// with another id THIS device generates, since the server dedups per
-// approval_id globally and a collision would just look like a (harmless)
-// retried duplicate, not a wrong action.
-void generateId(char* out, size_t outSize) {
-  static const char* hex = "0123456789abcdef";
-  for (size_t i = 0; i + 1 < outSize && i < 32; i++) {
-    out[i] = hex[esp_random() & 0xF];
-  }
-  out[outSize > 32 ? 32 : outSize - 1] = '\0';
-}
-
+// Thin wrapper: supplies the SoC-specific id/timestamp, then defers to
+// store::enqueueApproval() (ApprovalOutbox.h) for the actual durable-
+// before-network logic — the on-device web UI (ui/WebUiServer.cpp) calls
+// the exact same shared function, not a duplicate of this. Behavior is
+// unchanged from before this was split out: AlreadyPending/OutboxFull
+// still silently no-op and leave the screen where it was (the UI already
+// prevents queuing a 2nd action on a job with one pending, and a full
+// outbox is surfaced elsewhere) — only a real Ok persists to SD and
+// returns to the Inbox.
 void enqueueApproval(InboxUiState& state, store::ApprovalAction action) {
   if (state.selectedJobIndex < 0) return;
   store::JobEntry& job = const_cast<store::JobEntry&>(state.jobs->at(static_cast<size_t>(state.selectedJobIndex)));
 
-  if (state.outbox->hasPendingForJob(job.jobId)) {
-    return;  // already has an unsynced approval queued — see ApprovalOutbox.h
-  }
-  if (state.outbox->full()) {
-    return;  // UI should have surfaced "sync before approving more" already
-  }
+  char approvalId[store::kApprovalIdLen + 1];
+  fwrand::randomHex(approvalId, store::kApprovalIdLen);
 
-  store::ApprovalEntry entry;
-  generateId(entry.approvalId, sizeof(entry.approvalId));
-  std::strncpy(entry.jobId, job.jobId, sizeof(entry.jobId) - 1);
-  entry.action = action;
-  entry.createdAt = nowEpoch();
-  entry.synced = false;
+  store::EnqueueResult result =
+      store::enqueueApproval(*state.jobs, *state.outbox, job.jobId, action, approvalId, nowEpoch());
+  if (result != store::EnqueueResult::Ok) return;
 
-  if (state.outbox->append(entry)) {
-    store::saveApprovalOutbox(*state.outbox);  // durable BEFORE any network attempt — see ApprovalOutbox.h
-
-    store::JobStatus newStatus = store::JobStatus::Downloaded;
-    switch (action) {
-      case store::ApprovalAction::Print:
-        newStatus = store::JobStatus::ApprovedPrint;
-        break;
-      case store::ApprovalAction::Keep:
-        newStatus = store::JobStatus::ApprovedKeep;
-        break;
-      case store::ApprovalAction::Delete:
-        newStatus = store::JobStatus::ApprovedDelete;
-        break;
-    }
-    state.jobs->setStatus(job.jobId, newStatus);
-    store::saveJobIndex(*state.jobs);
-  }
-
+  store::saveApprovalOutbox(*state.outbox);  // durable BEFORE any network attempt — see ApprovalOutbox.h
+  store::saveJobIndex(*state.jobs);
   state.mode = ScreenMode::Inbox;
 }
 
@@ -238,6 +272,12 @@ void enqueueApproval(InboxUiState& state, store::ApprovalAction action) {
 
 void initApp(App& app, InboxUiState& state) {
   app.setScreen(screenRouter, &state);
+
+  // state.jobs/outbox/deviceConfig are already wired by main.cpp's
+  // setup() before this call — see InboxUI.h's InboxUiState comment for
+  // why webUiServer takes these post-construction rather than as
+  // reference members.
+  state.webUiServer.attach(state.jobs, state.outbox, state.deviceConfig);
 
   app.on(
       ActionOpenJob,
@@ -313,6 +353,56 @@ void initApp(App& app, InboxUiState& state) {
   app.on(
       ActionSyncNow,
       [](const freeink::ui::ActionEvent&, void* userPtr) { static_cast<InboxUiState*>(userPtr)->requestSyncNow = true; },
+      &state);
+
+  app.on(
+      ActionOpenWebUiChoice,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        static_cast<InboxUiState*>(userPtr)->mode = ScreenMode::WebUiChoice;
+      },
+      &state);
+
+  app.on(
+      ActionWebUiChoiceRowSelect,
+      [](const freeink::ui::ActionEvent& event, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        switch (event.value) {
+          case 0:
+            if (s.webUiServer.startStation()) {
+              s.mode = ScreenMode::WebUi;
+            } else {
+              s.webUiStartError = "No known Wi-Fi network in range";
+              // stays on WebUiChoice — webUiChoiceScreen shows the error once
+            }
+            break;
+          case 1:
+            if (s.webUiServer.startHotspot()) {
+              s.mode = ScreenMode::WebUi;
+            } else {
+              s.webUiStartError = "Could not start hotspot";
+            }
+            break;
+          default:
+            s.mode = ScreenMode::Inbox;  // Cancel
+            break;
+        }
+      },
+      &state);
+
+  app.on(
+      ActionWebUiStop,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        s.webUiServer.stop();
+        s.mode = ScreenMode::Inbox;
+      },
+      &state);
+
+  app.on(
+      ActionCancelWebUiChoice,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        static_cast<InboxUiState*>(userPtr)->mode = ScreenMode::Inbox;
+      },
       &state);
 }
 

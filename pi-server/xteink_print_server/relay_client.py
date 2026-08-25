@@ -33,23 +33,56 @@ class RelayClient:
         self.db = db
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Guards start()/stop() themselves (not the poll loop) — the admin
+        # console can call these from a request thread whenever a settings
+        # POST flips relay_url between empty/non-empty, and two such POSTs
+        # could otherwise race each other's check-then-act.
+        self._lifecycle_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
         return bool(self.config.relay_url and self.config.relay_account_id and self.config.relay_account_token)
 
+    @property
+    def running(self) -> bool:
+        """Whether the poll thread is actually alive right now — distinct
+        from `enabled` (config says it *should* run). The admin console
+        (admin_api.py) uses both to decide whether a settings change needs
+        to start/stop the thread."""
+        return self._thread is not None and self._thread.is_alive()
+
     def start(self) -> None:
         if not self.enabled:
             logger.info("relay client disabled (XTEINK_RELAY_URL not configured)")
             return
-        self._thread = threading.Thread(target=self._run, name="relay-client", daemon=True)
-        self._thread.start()
-        logger.info("relay client started, polling %s every %ds", self.config.relay_url, self.config.relay_poll_interval_seconds)
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                if self._stop.is_set():
+                    # A stop() is still in flight — e.g. blocked inside a
+                    # slow/unreachable relay request (_request uses a 15s
+                    # urlopen timeout, longer than stop()'s own 5s join).
+                    # Wait for it to actually exit rather than either
+                    # returning early (silently leaving nothing running
+                    # once the stale thread's loop next checks _stop and
+                    # exits) or spawning a second concurrent poller.
+                    self._thread.join(timeout=20)
+                    if self._thread.is_alive():
+                        logger.warning("relay poll thread did not stop in time; not starting a new one")
+                        return
+                else:
+                    return  # already running normally
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._run, name="relay-client", daemon=True)
+            self._thread.start()
+            logger.info(
+                "relay client started, polling %s every %ds", self.config.relay_url, self.config.relay_poll_interval_seconds
+            )
 
     def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
+        with self._lifecycle_lock:
+            self._stop.set()
+            if self._thread is not None:
+                self._thread.join(timeout=5)
 
     def _run(self) -> None:
         while not self._stop.is_set():

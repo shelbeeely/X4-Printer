@@ -68,4 +68,20 @@ bool WifiManager::isConnected() const { return WiFi.status() == WL_CONNECTED; }
 
 String WifiManager::currentSsid() const { return WiFi.SSID(); }
 
+String WifiManager::currentIp() const { return WiFi.localIP().toString(); }
+
+bool WifiManager::startAccessPoint(const char* ssid, const char* password) {
+  WiFi.mode(WIFI_AP);
+  // softAP() requires an 8+ character password (or empty for an open
+  // network, which the web UI's PIN gate never relies on — see
+  // WebUiServer.h) — callers always supply a generated password long
+  // enough that this can't silently fail on length.
+  return WiFi.softAP(ssid, password);
+}
+
+void WifiManager::stopAccessPoint() {
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
 }  // namespace net
