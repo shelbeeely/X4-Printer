@@ -1,0 +1,144 @@
+<title>How it works — X4 Print Inbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How the Pi print server, X4 firmware, and cloud relay work together to deliver an offline, wireless print inbox.">
+<link rel="stylesheet" href="assets/style.css">
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">X4 Print Inbox</a>
+    <nav class="site-nav">
+      <a href="index.html">Home</a>
+      <a href="how-it-works.html" aria-current="page">How it works</a>
+      <a href="setup.html">Setup</a>
+      <a href="flash.html">Flash firmware</a>
+      <a href="https://github.com/shelbeeely/x4-printer">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <h1>How it works</h1>
+
+  <p>
+    X4 Print Inbox turns an Xteink X4 e-paper device into a wireless print
+    inbox and offline approval terminal. A Raspberry Pi Zero W acts as a
+    normal network printer that any OS's built-in print dialog can find, no
+    drivers required. The X4 downloads new documents on wake, lets you read
+    and approve or reject them fully offline, and syncs the approval back
+    later &mdash; directly on the home LAN, or through a lightweight cloud
+    relay when you're away from home.
+  </p>
+
+  <h2>Three components</h2>
+
+  <div class="card">
+    <p><strong>Pi print server</strong> &mdash; receives print jobs over IPP
+    (so it shows up in any OS's print dialog, no drivers), keeps the
+    original document untouched, converts it to the X4's native page format,
+    and exposes a small sync API the X4 talks to on the LAN. It also
+    forwards approved jobs to the physical network printer via CUPS and
+    polls the relay for approvals that arrive while you're away from home.</p>
+  </div>
+
+  <div class="card">
+    <p><strong>X4 firmware</strong> &mdash; runs on the device itself: syncs
+    pending documents down over Wi-Fi, provides the offline reading and
+    approve/reject UI, records your decisions locally, and manages the
+    device's deep-sleep schedule so it spends almost all of its time
+    completely powered down.</p>
+  </div>
+
+  <div class="card">
+    <p><strong>Cloud relay</strong> &mdash; a small, optional store-and-forward
+    service. It carries only approval envelopes (device ID, job ID, action,
+    timestamps) &mdash; never document bytes &mdash; so the X4 can approve or
+    reject a print while away from home without exposing the home network.</p>
+  </div>
+
+  <h2>Wake, sync, sleep</h2>
+
+  <p>
+    The X4 is asleep almost all the time. Each time it wakes &mdash; from a
+    button press or a scheduled timer &mdash; it runs a short, bounded sync
+    sequence and goes straight back to sleep:
+  </p>
+
+  <div class="card">
+    <ol>
+      <li>Wake up, from a button press or an RTC timer.</li>
+      <li>Connect to the strongest saved Wi-Fi network, with a bounded
+      timeout. If no network is reachable, that's treated as normal &mdash;
+      the device skips straight to shutting down, not an error state.</li>
+      <li>Ask the Pi which documents are pending.</li>
+      <li>Stream each new document down to the SD card in small chunks,
+      computing a SHA-256 checksum as it goes &mdash; the full document is
+      never held in memory at once.</li>
+      <li>Verify the checksum against the one the Pi sent. A match
+      acknowledges the download and marks the job ready to read; a mismatch
+      discards the partial file and leaves the job pending for the next
+      wake.</li>
+      <li>Send any approve/keep/delete decisions made since the last wake
+      back to the Pi directly, or to the relay if the Pi isn't reachable on
+      the current network.</li>
+      <li>If that sync drained new approvals, repeat the fetch-and-drain
+      once more (capped at two passes total, so a slow or misbehaving
+      server can never keep the radio on indefinitely).</li>
+      <li>Turn the Wi-Fi radio off.</li>
+      <li>Power down and go back to deep sleep.</li>
+    </ol>
+  </div>
+
+  <p>
+    While you're actively reading or approving documents in the on-device
+    UI, the sync sequence above only runs once, at wake. Further approvals
+    you make during that session are queued locally and sent on the
+    <em>next</em> wake, so the radio stays off for the rest of your
+    interactive session. Nothing in this design requires the X4 to be
+    reachable or wakeable remotely &mdash; it never listens for an inbound
+    connection.
+  </p>
+
+  <h2>Why this is reliable</h2>
+
+  <div class="card">
+    <p><strong>Approvals can't double-apply.</strong> Every approval the X4
+    sends carries a unique ID it generated itself. The Pi treats that ID as
+    the single source of truth for "has this approval already happened?" and
+    applies the approval (e.g. sending a job to the printer) and records it
+    as applied in one atomic step. So if the same approval arrives twice
+    &mdash; a retry after a dropped connection, or the same approval showing
+    up via both the direct LAN path and the relay &mdash; the Pi recognizes
+    the duplicate and returns the original result instead of printing the
+    document again.</p>
+  </div>
+
+  <div class="card">
+    <p><strong>The firmware never runs out of memory.</strong> The X4's
+    microcontroller has a small, fixed amount of working memory shared
+    between Wi-Fi, the display, and the app itself. The firmware never holds
+    a whole document in memory &mdash; downloads and page rendering both
+    stream through small fixed-size buffers a few kilobytes at a time,
+    regardless of how large the document is. The list of pending jobs and
+    queued approvals is similarly capped at a fixed size; once full, the
+    device asks you to archive or delete something rather than silently
+    growing without bound.</p>
+  </div>
+
+  <div class="card">
+    <p><strong>The network exposure is deliberately narrow.</strong> The
+    Pi's sync API is TLS-protected and requires a per-device token, and it's
+    never exposed beyond the home LAN &mdash; no port forwarding, no inbound
+    rule on the home router. The relay is also TLS-protected and sees only
+    IDs, actions, and timestamps by default, never document contents, and it
+    can't cause a print by itself: the Pi independently re-checks the device
+    token before ever acting on an approval it received through the relay.</p>
+  </div>
+
+  <p>
+    Full technical design:
+    <a href="https://github.com/shelbeeely/x4-printer/blob/claude/xteink-print-inbox-system-6lh4v6/docs/architecture.md">architecture.md on GitHub</a>.
+  </p>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>MIT licensed. <a href="https://github.com/shelbeeely/x4-printer">Source on GitHub</a>.</p>
+  </div>
+</footer>
