@@ -115,20 +115,25 @@ the physical UI.
   every paired device's name, reprint/keep/archive/requeue/purge any job,
   revoke or rotate any device's token, edit `cups_queue`,
   `retention_days`, and the relay fields live, and — as of the on-device
-  Web UI's full-document preview feature — download any job's untouched
-  original document via `GET .../jobs/{id}/original`. This is meaningfully
-  more powerful than the sync API (which only ever acts on the one device
-  presenting a valid token for itself) — treat the admin password with at
-  least the same care as the relay account token, and don't port-forward
-  this any more than you would the sync API.
-- **`GET .../jobs/{id}/original` is reachable from any device that knows
+  Web UI's full-document preview feature and its later thumbnail/recent-
+  activity extensions — download any job's untouched original document
+  (`GET .../jobs/{id}/original`), its thumbnail (`GET
+  .../jobs/{id}/thumbnail`), and any device's approval history (`GET
+  .../devices/{id}/approvals`). This is meaningfully more powerful than
+  the sync API (which only ever acts on the one device presenting a valid
+  token for itself) — treat the admin password with at least the same
+  care as the relay account token, and don't port-forward this any more
+  than you would the sync API.
+- **All three of those routes are reachable from any device that knows
   the admin password**, not just the paired X4 — by design, since the
   whole point (see `docs/architecture.md` "On-device Web UI full-document
-  preview") is that a phone's browser fetches it directly, bypassing the
-  X4 entirely. This doesn't widen what the password already grants (a
+  preview") is that a phone's browser fetches them directly, bypassing the
+  X4 entirely. None of them widen what the password already grants: a
   logged-in admin could already read `original_bytes`/`original_mime`
-  metadata for every job via `GET .../jobs`); it adds one route that
-  serves the bytes those fields already describe.
+  metadata for every job via `GET .../jobs`, and every device's approval
+  history via the existing unfiltered `GET .../approvals` — these routes
+  just serve the same underlying data pre-filtered or as raw bytes instead
+  of metadata.
 - **No rate limiting or lockout** on repeated failed Basic-auth attempts —
   same "no rate limiting" gap already documented below for the other
   listeners, not something this feature adds beyond what already exists.

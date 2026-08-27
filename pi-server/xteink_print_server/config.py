@@ -120,8 +120,12 @@ class Config:
     def xtc_dir(self) -> Path:
         return self.data_dir / "xtc"
 
+    @property
+    def thumbnails_dir(self) -> Path:
+        return self.data_dir / "thumbnails"
+
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.originals_dir, self.xtc_dir, self.tls_cert.parent):
+        for d in (self.data_dir, self.originals_dir, self.xtc_dir, self.thumbnails_dir, self.tls_cert.parent):
             d.mkdir(parents=True, exist_ok=True)
 
     @property

@@ -172,8 +172,12 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_list_jobs()
         elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "original":
             self._handle_get_original(rest[1])
+        elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "thumbnail":
+            self._handle_get_thumbnail(rest[1])
         elif rest == ["devices"]:
             self._handle_list_devices()
+        elif len(rest) == 3 and rest[0] == "devices" and rest[2] == "approvals":
+            self._handle_list_device_approvals(rest[1])
         elif rest == ["approvals"]:
             self._handle_list_approvals()
         elif rest == ["settings"]:
@@ -241,6 +245,37 @@ class AdminApiHandler(BaseHTTPRequestHandler):
         ]
         self._send_json(200, {"jobs": jobs})
 
+    def _serve_job_file(
+        self, job_id: str, path_field: str, default_content_type: str, *, mime_field: str = "", inline: bool = False
+    ) -> None:
+        """Shared by _handle_get_original/_handle_get_thumbnail below — both
+        are "look up the job, read one of its path columns, stream the
+        bytes" with only the content-type source and one header differing.
+        job_id-not-found and path-field-empty (e.g. a job with no
+        thumbnail) both 404 the same way as a missing file, since none are
+        distinct error states worth a special client-side message."""
+        job = self.db.get_job(job_id)
+        if job is None:
+            self._send_json(404, {"error": "job not found"})
+            return
+        path_str = job[path_field]
+        if not path_str:
+            self._send_json(404, {"error": f"{path_field} not set"})
+            return
+        try:
+            data = Path(path_str).read_bytes()
+        except OSError:
+            self._send_json(404, {"error": f"{path_field} file not found"})
+            return
+        content_type = (job[mime_field] if mime_field else None) or default_content_type
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        if inline:
+            self.send_header("Content-Disposition", "inline")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _handle_get_original(self, job_id: str) -> None:
         """Streams the untouched original document (the file printer_forward
         never sees — only convert.py's XTC output goes to the X4) so a phone
@@ -250,22 +285,16 @@ class AdminApiHandler(BaseHTTPRequestHandler):
         fetches this URL directly, bypassing the X4 entirely, so nothing here
         is stored on the device (see docs/architecture.md "On-device Web UI
         full-document preview")."""
-        job = self.db.get_job(job_id)
-        if job is None:
-            self._send_json(404, {"error": "job not found"})
-            return
-        try:
-            data = Path(job["original_path"]).read_bytes()
-        except OSError:
-            self._send_json(404, {"error": "original not found"})
-            return
-        content_type = job["original_mime"] or "application/octet-stream"
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", "inline")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._serve_job_file(job_id, "original_path", "application/octet-stream", mime_field="original_mime", inline=True)
+
+    def _handle_get_thumbnail(self, job_id: str) -> None:
+        """Streams a small JPEG thumbnail (convert.py's render_thumbnail_jpeg,
+        generated once at ingest from the job's own first XTC page — see
+        ipp_server.py's _ingest_document) for the on-device web UI's job
+        cards, station mode only. 404s for any job ingested before this
+        feature existed (thumbnail_path == '', the migration default — see
+        db.py's _ensure_column)."""
+        self._serve_job_file(job_id, "thumbnail_path", "image/jpeg")
 
     def _handle_job_action(self, job_id: str) -> None:
         body = self._read_json_body()
@@ -305,8 +334,17 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self.db.clear_deliveries_and_reset_status(job_id)
             self._send_json(200, {"status": "requeued"})
         elif action == "purge":
-            for field in ("original_path", "xtc_path"):
-                Path(job[field]).unlink(missing_ok=True)
+            for field in ("original_path", "xtc_path", "thumbnail_path"):
+                # thumbnail_path is the first nullable/optional path column
+                # (''  for jobs with no thumbnail — see db.py's migration
+                # default) — the unguarded unlink() below was safe for the
+                # other two only because they're NOT NULL with no
+                # empty-string producer anywhere. Path("").unlink() would
+                # resolve to the current working directory; guard against it
+                # explicitly rather than relying on unlink() to fail safely.
+                path_str = job[field]
+                if path_str:
+                    Path(path_str).unlink(missing_ok=True)
             self.db.delete_job_row(job_id)
             self._send_json(200, {"status": "purged"})
         else:
@@ -348,6 +386,18 @@ class AdminApiHandler(BaseHTTPRequestHandler):
 
     def _handle_list_approvals(self) -> None:
         approvals = [dict(row) for row in self.db.list_recent_approvals(50)]
+        self._send_json(200, {"approvals": approvals})
+
+    def _handle_list_device_approvals(self, device_id: str) -> None:
+        """Backs the on-device web UI's "recent activity" link (station
+        mode only) — the phone opens this URL directly, same non-proxied
+        pattern as _handle_get_original/_handle_get_thumbnail above. No
+        "device exists" check (unlike _handle_revoke_device): a revoked
+        device's device_id still has valid historical approval rows
+        (delete_device leaves approvals alone — no FK constraint), and
+        showing history for a just-revoked device from this same admin
+        console is reasonable, not an error case."""
+        approvals = [dict(row) for row in self.db.list_recent_approvals_for_device(device_id, limit=10)]
         self._send_json(200, {"approvals": approvals})
 
     # -- handlers: settings -----------------------------------------------------

@@ -32,10 +32,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{o
 .signal-ok{color:var(--gold);border-color:var(--gold)}
 .signal-weak{color:var(--danger);border-color:var(--danger)}
 #sync-banner{color:var(--muted);font-size:.85rem;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:.5rem .75rem;margin:.5rem 0}
+#activity-link{font-size:.85rem}
 details#diag{margin:.5rem 0;font-size:.85rem;color:var(--muted)}
 details#diag summary{cursor:pointer;font-weight:600;color:var(--fg)}
 details#diag p{margin:.3rem 0}
 .job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
+.job .thumb{display:block;max-width:100%;border-radius:10px;border:1px solid var(--border);margin-bottom:.5rem}
 .job h3{margin:0 0 .25rem;font-size:1rem}
 .job .meta{margin:0 0 .5rem;font-size:.78rem;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .job button,.job a{display:inline-block;margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);text-decoration:none;transition:border-color .15s ease,transform .1s ease}
@@ -56,6 +58,7 @@ details#diag p{margin:.3rem 0}
 </header>
 <p id="status" aria-live="polite" aria-atomic="true">Loading...</p>
 <p id="sync-banner" style="display:none"></p>
+<p id="activity-link" style="display:none"><a id="activity-link-a" href="#" target="_blank" rel="noopener">Recent activity</a></p>
 <details id="diag">
   <summary>Device info</summary>
   <div id="diag-body"></div>
@@ -94,6 +97,8 @@ applyTheme(currentThemePref());
 // (never proxied through or stored on the X4).
 let piAdminBaseUrl = null;
 
+let deviceId = null;
+
 async function refreshStatus() {
   const r = await fetch('/api/status');
   if (!r.ok) return;
@@ -101,8 +106,24 @@ async function refreshStatus() {
   document.getElementById('status').textContent =
     s.device_name + ' - ' + s.unread_count + ' unread of ' + s.job_count;
   piAdminBaseUrl = s.pi_admin_base_url || null;
+  deviceId = s.device_id || null;
   renderConnectivity(s);
   renderSyncBanner(s);
+  renderActivityLink();
+}
+
+// Station mode + admin console only, same gating as the per-job "View full
+// document" link — a plain target=_blank navigation straight to the Pi
+// (not proxied through the X4), same reasoning: a fetch() here would be a
+// cross-origin request, and admin_api.py sends no CORS headers (see
+// docs/architecture.md "On-device Web UI full-document preview" for why
+// that's the deliberate choice over adding CORS support).
+function renderActivityLink() {
+  const el = document.getElementById('activity-link');
+  if (!piAdminBaseUrl || !deviceId) { el.style.display = 'none'; return; }
+  document.getElementById('activity-link-a').href =
+    piAdminBaseUrl + '/api/admin/v1/devices/' + encodeURIComponent(deviceId) + '/approvals';
+  el.style.display = 'block';
 }
 
 function renderConnectivity(s) {
@@ -241,6 +262,28 @@ function buildCard(j) {
   div.dataset.jobId = j.job_id;
   div.dataset.pending = j.pending_approval ? '1' : '0';
   div.dataset.sha = j.xtc_sha256 || '';
+
+  // Station mode only, and only if this device was paired against a Pi
+  // with the admin console enabled (see docs/architecture.md "On-device
+  // Web UI full-document preview"). Placed once here (not in rebuildBody,
+  // which reruns on every pending/content change) since the thumbnail is
+  // tied to the job's identity, not its approval state — no reason to
+  // recreate/re-fetch it just because Print/Keep/Delete state changed.
+  // Whether this actually renders depends on the phone browser having
+  // already cached HTTP Basic Auth credentials for the Pi's origin (from
+  // opening "View full document" at least once this session) — unverified
+  // on real mobile browsers; onError below hides it cleanly either way,
+  // so the worst case is simply no thumbnail shown, never a broken image
+  // or an unexpected auth prompt (subresource loads don't trigger those).
+  if (piAdminBaseUrl) {
+    const thumb = document.createElement('img');
+    thumb.className = 'thumb';
+    thumb.loading = 'lazy';
+    thumb.alt = '';
+    thumb.src = piAdminBaseUrl + '/api/admin/v1/jobs/' + encodeURIComponent(j.job_id) + '/thumbnail';
+    thumb.onerror = () => thumb.remove();
+    div.appendChild(thumb);
+  }
 
   const h3 = document.createElement('h3');
   div.appendChild(h3);

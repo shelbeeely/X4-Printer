@@ -275,6 +275,52 @@ extension of it:
   hotspot mode's phone has no network path to the Pi at all, so the field
   (and the link) is omitted rather than shown-but-broken.
 
+Two more station-mode-only extensions reuse this exact shape — same
+password gate, same non-proxied direct link, same `piAdminBaseUrl`-presence
+gating:
+
+- **Job thumbnails.** `convert.py`'s `render_thumbnail_jpeg()` generates a
+  small JPEG from the job's own already-rendered, already-dithered first
+  XTC page (no second document render) at ingest time
+  (`ipp_server.py`'s `_ingest_document()`); a thumbnail-generation failure
+  is logged and simply leaves the job without one, never blocking
+  ingestion. Stored at `pi-server`'s `thumbnails_dir` and tracked by
+  `jobs.thumbnail_path` (`db.py`'s `SCHEMA`, added via an explicit
+  `_ensure_column()` migration — this project's first schema change to an
+  already-deployed table; see that function's docstring for what it does
+  and doesn't cover). Served by `GET /api/admin/v1/jobs/{id}/thumbnail`
+  and rendered as a plain `<img>` per job card in `joblist.html`, with
+  `onerror` removing the element on any failure (unknown job, no
+  thumbnail generated, network failure) — the same "omit rather than
+  show broken" rule as everywhere else in this feature.
+
+  One open question, not fully resolved: unlike the "View full document"
+  `<a target="_blank">` link (a top-level navigation, which reliably
+  triggers the browser's native HTTP Basic Auth prompt on first use), an
+  `<img>` is a subresource load. Verified in this project's own testing
+  (a real headless Chromium, not just reasoning): a subresource request to
+  an unauthenticated Basic-Auth origin fails cleanly with no prompt and no
+  hang — so there's no risk of a jarring, unexplained password dialog
+  appearing just because a thumbnail tried to load. What's *not* verified
+  on real mobile browsers is whether completing that native prompt once
+  (by opening "View full document") leaves credentials cached broadly
+  enough that a *subsequent* `<img>` load — possibly in a different tab —
+  succeeds silently afterward, the way HTTP Basic Auth caching has
+  classically worked. If it doesn't hold on a given browser, the practical
+  effect is simply "no thumbnail appears" — never a broken image, an
+  incorrect one, or an unexpected prompt.
+- **Recent activity.** `db.py`'s `list_recent_approvals_for_device()`
+  (using the existing `idx_approvals_device` index) backs
+  `GET /api/admin/v1/devices/{id}/approvals` — scoped to one device's own
+  approval history (not the whole household's), reusing `device_id` from
+  `/api/status`. Rendered as one more `<a target="_blank">` link, for the
+  same reason as "View full document": a `fetch()` here would be a
+  cross-origin request, and `admin_api.py` sends no CORS headers to any
+  route — adding CORS support (correctly — reflecting the X4's specific
+  origin, never `*`, since responses carry job titles/approval detail) is
+  a real option for a nicer inline list, but a deliberately separate
+  follow-up, not bundled into this feature.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,
