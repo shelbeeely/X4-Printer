@@ -104,9 +104,9 @@ body {
   right: 0;
   bottom: 0;
   height: 10px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='16' viewBox='0 0 40 16'%3E%3Cpath d='M0 8 Q10 0 20 8 T40 8 V16 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 11 Q10 4 20 11 T40 11 V16 H0 Z' fill='%23bd361e' opacity='0.55'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='0.55'/%3E%3C/svg%3E");
   background-repeat: repeat-x;
-  background-size: 40px 16px;
+  background-size: 40px 100%;
   animation: waveBob 3s ease-in-out infinite;
 }
 
