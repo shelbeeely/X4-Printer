@@ -183,6 +183,16 @@ code, pre {
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table td.empty { color: var(--muted); text-align: center; padding: 1.25rem; }
 
+.job-thumb {
+  display: block;
+  height: 48px;
+  width: auto;
+  max-width: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
 .row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 
 .btn {
