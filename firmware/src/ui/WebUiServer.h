@@ -44,7 +44,13 @@ class WebUiServer {
   // after construction rather than reference members) — call once from
   // ui::initApp(), after InboxUiState's own pointers are set in
   // main.cpp's setup().
-  void attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox, const config::DeviceConfigData* deviceConfig);
+  // panelWidth/panelHeight/wakeMillis feed the diagnostics route
+  // (handleApiDiag()) only — the device already computes these for its own
+  // framebuffer sizing and idle timer (main.cpp's setup()), so this is
+  // exposing existing values, not tracking new state on this class's
+  // behalf.
+  void attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox, const config::DeviceConfigData* deviceConfig,
+              uint16_t panelWidth, uint16_t panelHeight, uint32_t wakeMillis);
 
   // Joins a known Wi-Fi network (net::WifiManager::connect(), same saved
   // credentials the normal sync pass uses) and starts the server on the
@@ -86,6 +92,9 @@ class WebUiServer {
   store::JobIndex* jobs_ = nullptr;
   store::ApprovalOutboxIndex* outbox_ = nullptr;
   const config::DeviceConfigData* deviceConfig_ = nullptr;
+  uint16_t panelWidth_ = 0;
+  uint16_t panelHeight_ = 0;
+  uint32_t wakeMillis_ = 0;
 
   WebServer server_{80};
   WebUiMode mode_ = WebUiMode::Off;
@@ -114,6 +123,7 @@ class WebUiServer {
   void handleRoot();
   void handleLogin();
   void handleApiStatus();
+  void handleApiDiag();
   void handleApiJobsGet();
   void handleApiJobsPost();
   void handleApiJobXtc();

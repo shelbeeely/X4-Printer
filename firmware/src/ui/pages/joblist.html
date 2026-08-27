@@ -1,38 +1,92 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>X4 Print Inbox</title>
+<script>(function(){try{var t=localStorage.getItem('x4-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
 <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
 <style>
 :root{
   --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
-  --accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6;
+  --accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--sage:#6b7048;--danger:#bd361e;--danger-bg:#f6ded6;
   color-scheme:light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root{
     --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
-    --accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810;
+    --accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--sage:#8f9463;--danger:#ff6a47;--danger-bg:#3a1810;
   }
 }
+html[data-theme="dark"]{--bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;--accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--sage:#8f9463;--danger:#ff6a47;--danger-bg:#3a1810}
+html[data-theme="light"]{--bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;--accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--sage:#6b7048;--danger:#bd361e;--danger-bg:#f6ded6}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
 body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
 header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
-header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
 header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
+.header-row{display:flex;align-items:center;gap:.6rem}
+.header-row h1{flex:1;margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#theme-toggle{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer}
+.signal{display:inline-flex;align-items:center;padding:.2rem .5rem;border-radius:999px;font-size:.7rem;font-weight:700;border:1px solid var(--border)}
+.signal-strong{color:var(--sage);border-color:var(--sage)}
+.signal-ok{color:var(--gold);border-color:var(--gold)}
+.signal-weak{color:var(--danger);border-color:var(--danger)}
+#sync-banner{color:var(--muted);font-size:.85rem;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:.5rem .75rem;margin:.5rem 0}
+details#diag{margin:.5rem 0;font-size:.85rem;color:var(--muted)}
+details#diag summary{cursor:pointer;font-weight:600;color:var(--fg)}
+details#diag p{margin:.3rem 0}
 .job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
 .job h3{margin:0 0 .25rem;font-size:1rem}
+.job .meta{margin:0 0 .5rem;font-size:.78rem;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .job button,.job a{display:inline-block;margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);text-decoration:none;transition:border-color .15s ease,transform .1s ease}
 .job button:hover,.job a:hover{border-color:var(--accent)}
 .job button:active,.job a:active{transform:scale(.96)}
+.job button:disabled{opacity:.4;transform:none;cursor:default}
 .job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
+.pagenav{display:inline-flex;align-items:center;gap:.2rem}
+.pagelabel{font-size:.8rem;color:var(--muted);padding:0 .2rem}
 #status{color:var(--muted);font-size:.85rem}
 </style></head><body>
-<header><h1>Print Inbox</h1></header>
-<p id="status">Loading...</p>
+<header>
+  <div class="header-row">
+    <h1>Print Inbox</h1>
+    <span id="signal" class="signal" style="display:none"></span>
+    <button id="theme-toggle" type="button" aria-label="Toggle color theme">Auto</button>
+  </div>
+</header>
+<p id="status" aria-live="polite" aria-atomic="true">Loading...</p>
+<p id="sync-banner" style="display:none"></p>
+<details id="diag">
+  <summary>Device info</summary>
+  <div id="diag-body"></div>
+</details>
 <div id="jobs"></div>
 <script>
+// ---------------- Theme toggle (client-only; no device-side storage) ----------------
+function currentThemePref() {
+  try { return localStorage.getItem('x4-theme') || 'system'; } catch (e) { return 'system'; }
+}
+function applyTheme(pref) {
+  if (pref === 'light' || pref === 'dark') {
+    document.documentElement.setAttribute('data-theme', pref);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  document.getElementById('theme-toggle').textContent = pref === 'light' ? 'Light' : pref === 'dark' ? 'Dark' : 'Auto';
+}
+document.getElementById('theme-toggle').onclick = function () {
+  const order = ['system', 'light', 'dark'];
+  const next = order[(order.indexOf(currentThemePref()) + 1) % order.length];
+  try {
+    if (next === 'system') localStorage.removeItem('x4-theme');
+    else localStorage.setItem('x4-theme', next);
+  } catch (e) {}
+  applyTheme(next);
+};
+applyTheme(currentThemePref());
+
+// ---------------- Status / connectivity / sync ----------------
+
 // Set only in station mode, and only when this device was paired against a
 // Pi with the admin console enabled (see docs/architecture.md "On-device
 // Web UI full-document preview") — lets refreshJobs() link straight to the
@@ -47,63 +101,227 @@ async function refreshStatus() {
   document.getElementById('status').textContent =
     s.device_name + ' - ' + s.unread_count + ' unread of ' + s.job_count;
   piAdminBaseUrl = s.pi_admin_base_url || null;
+  renderConnectivity(s);
+  renderSyncBanner(s);
 }
+
+function renderConnectivity(s) {
+  const el = document.getElementById('signal');
+  if (s.wifi_rssi === undefined) { el.style.display = 'none'; return; }
+  const rssi = s.wifi_rssi;
+  let tier, label;
+  if (rssi >= -60) { tier = 'strong'; label = 'Strong Wi-Fi signal'; }
+  else if (rssi >= -75) { tier = 'ok'; label = 'OK Wi-Fi signal'; }
+  else { tier = 'weak'; label = 'Weak Wi-Fi signal'; }
+  el.style.display = 'inline-flex';
+  el.className = 'signal signal-' + tier;
+  el.textContent = rssi + ' dBm';
+  el.setAttribute('aria-label', label + ', ' + rssi + ' dBm');
+}
+
+function renderSyncBanner(s) {
+  const el = document.getElementById('sync-banner');
+  const n = s.outbox_pending || 0;
+  if (n > 0) {
+    el.textContent = n + (n === 1 ? ' action' : ' actions') + ' waiting to sync';
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// ---------------- Device diagnostics (lazy-fetched once, on expand) ----------------
+
+let diagLoaded = false;
+document.getElementById('diag').addEventListener('toggle', async function (e) {
+  if (!e.target.open || diagLoaded) return;
+  diagLoaded = true;
+  const body = document.getElementById('diag-body');
+  const r = await fetch('/api/diag');
+  if (!r.ok) { body.textContent = 'Unavailable.'; return; }
+  const d = await r.json();
+  body.innerHTML = '';
+  const rows = [
+    ['Name', d.device_name],
+    ['ID', d.device_id],
+    ['Panel', d.panel_width + '×' + d.panel_height],
+    ['Uptime', Math.floor(d.uptime_seconds / 60) + ' min'],
+  ];
+  for (const pair of rows) {
+    const p = document.createElement('p');
+    p.textContent = pair[0] + ': ' + pair[1];
+    body.appendChild(p);
+  }
+});
+
+// ---------------- Job list rendering (diff/patch — see renderJobs()) ----------------
+
+function formatMeta(j) {
+  const sizeKb = (j.xtc_bytes / 1024).toFixed(0) + ' KB';
+  const date = new Date(j.created_at * 1000).toLocaleString();
+  const sha = (j.xtc_sha256 || '').slice(0, 8);
+  return j.status + ' · ' + sizeKb + ' · ' + date + (sha ? ' · ' + sha : '');
+}
+
+function updateCardText(div, j) {
+  div._refs.h3.textContent = j.title + ' (' + j.page_count + ' pg)';
+  div._refs.meta.textContent = formatMeta(j);
+}
+
+// Rebuilds the interactive part of a card (actions/preview/nav/doc-link) —
+// only called on first build, or when pending_approval flips, or when
+// xtc_sha256 changes (a re-synced job) — never on every poll, so an open
+// preview/page-nav state survives normal 20s refreshes untouched.
+function rebuildBody(div, j) {
+  const body = div._refs.body;
+  body.innerHTML = '';
+  div._preview = null;
+
+  if (j.pending_approval) {
+    const p = document.createElement('p');
+    p.textContent = 'Action queued, syncing...';
+    body.appendChild(p);
+    return;
+  }
+
+  for (const pair of [['Print', 'print'], ['Keep', 'keep'], ['Delete', 'delete']]) {
+    const b = document.createElement('button');
+    b.textContent = pair[0];
+    b.onclick = () => act(j.job_id, pair[1]);
+    body.appendChild(b);
+  }
+
+  const previewBtn = document.createElement('button');
+  previewBtn.textContent = 'Preview';
+
+  const navWrap = document.createElement('span');
+  navWrap.className = 'pagenav';
+  navWrap.style.display = 'none';
+  const prevBtn = document.createElement('button');
+  prevBtn.textContent = '‹';
+  prevBtn.setAttribute('aria-label', 'Previous page');
+  const pageLabel = document.createElement('span');
+  pageLabel.className = 'pagelabel';
+  const nextBtn = document.createElement('button');
+  nextBtn.textContent = '›';
+  nextBtn.setAttribute('aria-label', 'Next page');
+  navWrap.appendChild(prevBtn);
+  navWrap.appendChild(pageLabel);
+  navWrap.appendChild(nextBtn);
+
+  const canvas = document.createElement('canvas');
+  canvas.style.display = 'none';
+  canvas.style.maxWidth = '100%';
+  canvas.style.marginTop = '.5rem';
+  canvas.style.border = '1px solid var(--border)';
+  canvas.style.borderRadius = '10px';
+
+  div._navRefs = { canvas, navWrap, prevBtn, nextBtn, pageLabel };
+  previewBtn.onclick = () => openPreview(div, j);
+  prevBtn.onclick = () => turnPage(div, -1);
+  nextBtn.onclick = () => turnPage(div, 1);
+
+  body.appendChild(previewBtn);
+  body.appendChild(navWrap);
+  body.appendChild(canvas);
+
+  if (piAdminBaseUrl) {
+    const docLink = document.createElement('a');
+    docLink.textContent = 'View full document';
+    docLink.href = piAdminBaseUrl + '/api/admin/v1/jobs/' + encodeURIComponent(j.job_id) + '/original';
+    docLink.target = '_blank';
+    docLink.rel = 'noopener';
+    body.appendChild(docLink);
+  }
+}
+
+function buildCard(j) {
+  const div = document.createElement('div');
+  div.className = 'job';
+  div.dataset.jobId = j.job_id;
+  div.dataset.pending = j.pending_approval ? '1' : '0';
+  div.dataset.sha = j.xtc_sha256 || '';
+
+  const h3 = document.createElement('h3');
+  div.appendChild(h3);
+  const meta = document.createElement('p');
+  meta.className = 'meta';
+  div.appendChild(meta);
+  const body = document.createElement('div');
+  div.appendChild(body);
+
+  div._refs = { h3, meta, body };
+  updateCardText(div, j);
+  rebuildBody(div, j);
+  return div;
+}
+
+function updateCard(div, j) {
+  updateCardText(div, j);
+  const wasPending = div.dataset.pending === '1';
+  const isPending = !!j.pending_approval;
+  const oldSha = div.dataset.sha || '';
+  const newSha = j.xtc_sha256 || '';
+  if (isPending !== wasPending || oldSha !== newSha) {
+    rebuildBody(div, j);
+  }
+  div.dataset.pending = isPending ? '1' : '0';
+  div.dataset.sha = newSha;
+}
+
+const cardElements = new Map(); // job_id -> card <div>
+
+function renderJobs(jobs) {
+  const el = document.getElementById('jobs');
+  const incomingIds = new Set(jobs.map(j => j.job_id));
+
+  for (const [jobId, div] of cardElements) {
+    if (!incomingIds.has(jobId)) {
+      div.remove();
+      cardElements.delete(jobId);
+    }
+  }
+
+  const emptyMsg = el.querySelector('.empty');
+  if (jobs.length === 0) {
+    if (!emptyMsg) el.innerHTML = '<p class="empty">Inbox empty.</p>';
+    return;
+  }
+  if (emptyMsg) emptyMsg.remove();
+
+  let prevEl = null;
+  for (const j of jobs) {
+    let div = cardElements.get(j.job_id);
+    if (!div) {
+      div = buildCard(j);
+      cardElements.set(j.job_id, div);
+    } else {
+      updateCard(div, j);
+    }
+    const wantedNext = prevEl ? prevEl.nextSibling : el.firstChild;
+    if (wantedNext !== div) el.insertBefore(div, wantedNext);
+    prevEl = div;
+  }
+}
+
 async function refreshJobs() {
   const r = await fetch('/api/jobs');
   if (!r.ok) return;
   const data = await r.json();
-  const el = document.getElementById('jobs');
-  el.innerHTML = '';
-  if (data.jobs.length === 0) { el.innerHTML = '<p>Inbox empty.</p>'; return; }
-  for (const j of data.jobs) {
-    const div = document.createElement('div');
-    div.className = 'job';
-    const h = document.createElement('h3');
-    h.textContent = j.title + ' (' + j.page_count + ' pg)';
-    div.appendChild(h);
-    if (j.pending_approval) {
-      const p = document.createElement('p');
-      p.textContent = 'Action queued, syncing...';
-      div.appendChild(p);
-    } else {
-      for (const pair of [['Print','print'], ['Keep','keep'], ['Delete','delete']]) {
-        const b = document.createElement('button');
-        b.textContent = pair[0];
-        b.onclick = () => act(j.job_id, pair[1]);
-        div.appendChild(b);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.style.display = 'none';
-      canvas.style.maxWidth = '100%';
-      canvas.style.marginTop = '.5rem';
-      canvas.style.border = '1px solid var(--border)';
-      canvas.style.borderRadius = '10px';
-      const previewBtn = document.createElement('button');
-      previewBtn.textContent = 'Preview';
-      previewBtn.onclick = () => preview(j.job_id, canvas);
-      div.appendChild(previewBtn);
-      div.appendChild(canvas);
-      if (piAdminBaseUrl) {
-        const docLink = document.createElement('a');
-        docLink.textContent = 'View full document';
-        docLink.href = piAdminBaseUrl + '/api/admin/v1/jobs/' + encodeURIComponent(j.job_id) + '/original';
-        docLink.target = '_blank';
-        docLink.rel = 'noopener';
-        div.appendChild(docLink);
-      }
-    }
-    el.appendChild(div);
-  }
+  renderJobs(data.jobs);
 }
+
 async function act(jobId, action) {
   await fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({job_id: jobId, action: action})});
   refreshJobs();
 }
 
-// Client-side XTC decode (tools/xtc-wasm/), entirely offline once
-// xtc-decoder.js/.wasm are fetched from this device — no CDN, no external
-// libraries, matches the hotspot mode's no-internet-access constraint.
+// ---------------- Client-side XTC decode + preview (tools/xtc-wasm/) ----------------
+// Entirely offline once xtc-decoder.js/.wasm are fetched from this device —
+// no CDN, no external libraries, matches the hotspot mode's no-internet-
+// access constraint.
+
 let xtcModulePromise = null;
 function loadXtcModule() {
   if (!xtcModulePromise) {
@@ -119,59 +337,163 @@ function loadXtcModule() {
   }
   return xtcModulePromise;
 }
-async function preview(jobId, canvas) {
+
+// Raw XTC bytes, keyed by job_id+sha256, and decoded pages, keyed by
+// job_id+sha256+page — both capped with simple insertion-order eviction so
+// a long browsing session can't grow either cache unbounded. Keying on the
+// checksum (not job_id alone) means a re-synced job with different content
+// can never serve a stale cached preview: it just leaves the old entries
+// as harmless, eventually-evicted dead keys under a new key.
+const rawBytesCache = new Map();
+const decodedCache = new Map();
+const MAX_RAW_CACHE = 16;
+const MAX_DECODED_CACHE = 32;
+
+function cacheSet(map, key, value, max) {
+  map.set(key, value);
+  if (map.size > max) map.delete(map.keys().next().value);
+}
+
+async function fetchRawBytes(jobId, sha) {
+  const key = jobId + ':' + sha;
+  const cached = rawBytesCache.get(key);
+  if (cached) return cached;
+  const r = await fetch('/api/jobs/xtc?job_id=' + encodeURIComponent(jobId));
+  if (!r.ok) throw new Error('fetch failed');
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  cacheSet(rawBytesCache, key, bytes, MAX_RAW_CACHE);
+  return bytes;
+}
+
+function paintGray(canvas, gray, width, height) {
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+  for (let i = 0; i < width * height; i++) {
+    const v = gray[i];
+    imgData.data[i * 4] = v;
+    imgData.data[i * 4 + 1] = v;
+    imgData.data[i * 4 + 2] = v;
+    imgData.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function showPreviewError(canvas) {
+  canvas.width = 200;
+  canvas.height = 40;
+  const ctx = canvas.getContext('2d');
+  ctx.font = '14px sans-serif';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillText('Preview unavailable.', 4, 20);
+}
+
+function updateNav(state, refs, pageIndex) {
+  state.currentPage = pageIndex;
+  refs.pageLabel.textContent = 'Page ' + (pageIndex + 1) + ' / ' + state.pageCount;
+  refs.prevBtn.disabled = pageIndex === 0;
+  refs.nextBtn.disabled = pageIndex === state.pageCount - 1;
+}
+
+function turnPage(div, delta) {
+  const state = div._preview;
+  if (!state) return;
+  const target = state.currentPage + delta;
+  decodeAndRenderPage(div, target);
+}
+
+async function decodeAndRenderPage(div, pageIndex) {
+  const state = div._preview;
+  const refs = div._navRefs;
+  if (!state || pageIndex < 0 || pageIndex >= state.pageCount) return;
+
+  const decodedKey = div.dataset.jobId + ':' + state.sha + ':' + pageIndex;
+  const cachedPage = decodedCache.get(decodedKey);
+  if (cachedPage) {
+    paintGray(refs.canvas, cachedPage.gray, cachedPage.width, cachedPage.height);
+    updateNav(state, refs, pageIndex);
+    return;
+  }
+
+  const mod = state.mod;
+  let inPtr = 0, widthPtr = 0, heightPtr = 0, outPtr = 0;
+  try {
+    inPtr = mod._malloc(state.bytes.length);
+    widthPtr = mod._malloc(2);
+    heightPtr = mod._malloc(2);
+    if (!inPtr || !widthPtr || !heightPtr) throw new Error('out of memory');
+    mod.HEAPU8.set(state.bytes, inPtr);
+    outPtr = mod._xtc_decode_page(inPtr, state.bytes.length, pageIndex, widthPtr, heightPtr);
+    if (outPtr === 0) throw new Error('decode failed');
+    const width = mod.HEAPU16[widthPtr >> 1];
+    const height = mod.HEAPU16[heightPtr >> 1];
+    // Copy out of WASM memory before painting/caching — HEAPU8.subarray()
+    // is a *view*, not a copy; caching that view (or reading it after
+    // xtc_free()/a memory-growth reallocation) would risk reading freed or
+    // detached WASM memory the next time this page is opened from cache.
+    const gray = new Uint8Array(mod.HEAPU8.subarray(outPtr, outPtr + width * height));
+    cacheSet(decodedCache, decodedKey, {width, height, gray}, MAX_DECODED_CACHE);
+    paintGray(refs.canvas, gray, width, height);
+    updateNav(state, refs, pageIndex);
+  } catch (e) {
+    showPreviewError(refs.canvas);
+  } finally {
+    if (inPtr) mod._free(inPtr);
+    if (widthPtr) mod._free(widthPtr);
+    if (heightPtr) mod._free(heightPtr);
+    if (outPtr) mod._xtc_free(outPtr);
+  }
+}
+
+async function openPreview(div, j) {
+  const refs = div._navRefs;
+  const canvas = refs.canvas;
   canvas.style.display = 'block';
   const ctx = canvas.getContext('2d');
-  canvas.width = 200; canvas.height = 40;
+  canvas.width = 200;
+  canvas.height = 40;
   ctx.font = '14px sans-serif';
   ctx.fillText('Loading preview...', 4, 20);
+
+  const sha = j.xtc_sha256;
   let mod = null, inPtr = 0, widthPtr = 0, heightPtr = 0, outPtr = 0;
   try {
     // Independent I/O — overlap the module load with the file fetch
     // instead of paying both latencies back-to-back.
-    const [loadedMod, r] = await Promise.all([
-      loadXtcModule(),
-      fetch('/api/jobs/xtc?job_id=' + encodeURIComponent(jobId)),
-    ]);
+    const [loadedMod, bytes] = await Promise.all([loadXtcModule(), fetchRawBytes(j.job_id, sha)]);
     mod = loadedMod;
-    if (!r.ok) throw new Error('fetch failed');
-    const bytes = new Uint8Array(await r.arrayBuffer());
 
     inPtr = mod._malloc(bytes.length);
     widthPtr = mod._malloc(2);
     heightPtr = mod._malloc(2);
     if (!inPtr || !widthPtr || !heightPtr) throw new Error('out of memory');
     mod.HEAPU8.set(bytes, inPtr);
+
+    const pageCount = mod._xtc_page_count(inPtr, bytes.length) || 1;
     outPtr = mod._xtc_decode_page(inPtr, bytes.length, 0, widthPtr, heightPtr);
     if (outPtr === 0) throw new Error('decode failed');
-
     const width = mod.HEAPU16[widthPtr >> 1];
     const height = mod.HEAPU16[heightPtr >> 1];
-    const gray = mod.HEAPU8.subarray(outPtr, outPtr + width * height);
-    canvas.width = width;
-    canvas.height = height;
-    const imgData = ctx.createImageData(width, height);
-    for (let i = 0; i < width * height; i++) {
-      const v = gray[i];
-      imgData.data[i * 4] = v;
-      imgData.data[i * 4 + 1] = v;
-      imgData.data[i * 4 + 2] = v;
-      imgData.data[i * 4 + 3] = 255;
+    const gray = new Uint8Array(mod.HEAPU8.subarray(outPtr, outPtr + width * height));
+    cacheSet(decodedCache, div.dataset.jobId + ':' + sha + ':0', {width, height, gray}, MAX_DECODED_CACHE);
+    paintGray(canvas, gray, width, height);
+
+    div._preview = {mod, bytes, sha, pageCount, currentPage: 0};
+    if (pageCount > 1) {
+      refs.navWrap.style.display = 'inline-flex';
+      updateNav(div._preview, refs, 0);
     }
-    ctx.putImageData(imgData, 0, 0);
   } catch (e) {
-    canvas.width = 200; canvas.height = 40;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillText('Preview unavailable.', 4, 20);
+    showPreviewError(canvas);
   } finally {
-    if (mod) {
-      if (inPtr) mod._free(inPtr);
-      if (widthPtr) mod._free(widthPtr);
-      if (heightPtr) mod._free(heightPtr);
-      if (outPtr) mod._xtc_free(outPtr);
-    }
+    if (inPtr) mod._free(inPtr);
+    if (widthPtr) mod._free(widthPtr);
+    if (heightPtr) mod._free(heightPtr);
+    if (outPtr) mod._xtc_free(outPtr);
   }
 }
+
 // refreshJobs() reads piAdminBaseUrl, which only refreshStatus() sets —
 // sequenced (not fired concurrently) so the "View full document" link
 // can't be silently omitted by refreshJobs() winning the race on a slow

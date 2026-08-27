@@ -40,13 +40,35 @@ void randomPassword(char* out, size_t n) {  // out must be n+1 bytes; WPA2 needs
   out[n] = '\0';
 }
 
+// Human-readable job status for the web UI's job cards. Safe to change from
+// the raw enum ordinal the API used to send: the server and its only
+// consumer (ui/pages/joblist.html) always ship from the same firmware
+// image, so there's no external client depending on the old int shape.
+const char* jobStatusLabel(store::JobStatus s) {
+  switch (s) {
+    case store::JobStatus::Downloaded:
+      return "New";
+    case store::JobStatus::ApprovedPrint:
+      return "Printing";
+    case store::JobStatus::ApprovedKeep:
+      return "Kept";
+    case store::JobStatus::ApprovedDelete:
+      return "Deleted";
+  }
+  return "Unknown";
+}
+
 }  // namespace
 
 void WebUiServer::attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox,
-                          const config::DeviceConfigData* deviceConfig) {
+                          const config::DeviceConfigData* deviceConfig, uint16_t panelWidth, uint16_t panelHeight,
+                          uint32_t wakeMillis) {
   jobs_ = jobs;
   outbox_ = outbox;
   deviceConfig_ = deviceConfig;
+  panelWidth_ = panelWidth;
+  panelHeight_ = panelHeight;
+  wakeMillis_ = wakeMillis;
 }
 
 void WebUiServer::generateSessionSecrets() {
@@ -106,6 +128,10 @@ void WebUiServer::beginCommon() {
     server_.on("/api/status", HTTP_GET, [this]() {
       markActivity();
       handleApiStatus();
+    });
+    server_.on("/api/diag", HTTP_GET, [this]() {
+      markActivity();
+      handleApiDiag();
     });
     server_.on("/api/jobs", HTTP_GET, [this]() {
       markActivity();
@@ -205,7 +231,8 @@ void WebUiServer::handleLogin() {
                  "body{background:var(--bg);color:var(--fg);font-family:\"Nunito Sans\",-apple-system,"
                  "BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,"
                  "'Apple Color Emoji','Segoe UI Emoji';max-width:320px;margin:3rem auto;"
-                 "padding:0 1rem}</style>"
+                 "padding:0 1rem}"
+                 "a:focus-visible{outline:2px solid var(--danger);outline-offset:2px}</style>"
                  "<p style=\"color:var(--danger);background:var(--danger-bg);padding:.75rem;"
                  "border-radius:16px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
     return;
@@ -233,13 +260,51 @@ void WebUiServer::handleApiStatus() {
   }
   doc["job_count"] = total;
   doc["unread_count"] = unread;
+  // Local SD-card state, meaningful in both modes — not gated on
+  // connectivity the way pi_admin_base_url/wifi_rssi below are.
+  doc["outbox_pending"] = outbox_ != nullptr ? outbox_->countUnsynced() : 0;
+  if (deviceConfig_ != nullptr) {
+    doc["device_id"] = deviceConfig_->deviceId;
+  }
   // Only in station mode: hotspot mode's phone has no network path to the
   // Pi at all (see docs/architecture.md "On-device Web UI full-document
   // preview"), so there's nothing useful to link to there even if this
   // device happens to have been paired with the admin console enabled.
-  if (mode_ == WebUiMode::Station && deviceConfig_ != nullptr && deviceConfig_->hasAdminConsole) {
-    doc["pi_admin_base_url"] = deviceConfig_->piAdminBaseUrl;
+  // Same reasoning for wifi_rssi — "signal to the AP" is meaningless when
+  // this device is itself the AP.
+  if (mode_ == WebUiMode::Station) {
+    if (deviceConfig_ != nullptr && deviceConfig_->hasAdminConsole) {
+      doc["pi_admin_base_url"] = deviceConfig_->piAdminBaseUrl;
+    }
+    net::WifiManager wifi;
+    doc["wifi_rssi"] = wifi.rssi();
   }
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+// Split from handleApiStatus() rather than folded in: /api/status is polled
+// every 20s by the job-list page, and device_name/id/panel size/uptime
+// don't need that freshness — bloating the hot-polled payload with static
+// data would waste bytes on the hotspot AP's own limited bandwidth (the
+// same reasoning firmware/src/ui/pages/generate_pages_header.py's docstring
+// gives for gzip-embedding the pages themselves). The job-list page fetches
+// this once, lazily, only if the diagnostics panel is opened.
+void WebUiServer::handleApiDiag() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+
+  JsonDocument doc;
+  doc["device_name"] =
+      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Xteink X4";
+  doc["device_id"] = deviceConfig_ != nullptr ? deviceConfig_->deviceId : "";
+  doc["panel_width"] = panelWidth_;
+  doc["panel_height"] = panelHeight_;
+  doc["uptime_seconds"] = (millis() - wakeMillis_) / 1000;
 
   String out;
   serializeJson(doc, out);
@@ -261,7 +326,10 @@ void WebUiServer::handleApiJobsGet() {
     j["job_id"] = e.jobId;
     j["title"] = e.title;
     j["page_count"] = e.pageCount;
-    j["status"] = static_cast<uint8_t>(e.status);
+    j["status"] = jobStatusLabel(e.status);
+    j["xtc_bytes"] = e.xtcBytes;
+    j["xtc_sha256"] = e.xtcSha256;
+    j["created_at"] = e.createdAt;
     j["pending_approval"] = outbox_ != nullptr && outbox_->hasPendingForJob(e.jobId);
   }
 
