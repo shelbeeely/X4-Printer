@@ -58,12 +58,12 @@ constexpr const char* kLoginPageHtml =
   }
 }
 @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-@keyframes waveBob{0%,100%{background-position-x:0}50%{background-position-x:20px}}
+@keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
 @keyframes ctaGlow{0%,100%{box-shadow:0 0 0 rgba(225,122,37,0)}50%{box-shadow:0 0 14px rgba(225,122,37,.55)}}
 body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg);animation:fadeInUp .4s ease-out both}
-header{padding-bottom:.75rem;margin-bottom:1rem;position:relative}
+header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
 header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
-header::after{content:"";position:absolute;left:0;right:0;bottom:-7px;height:14px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveBob 3s ease-in-out infinite}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
 input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:16px}
 button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:999px;font-weight:600;animation:ctaGlow 2.5s ease-in-out infinite}
 </style></head>
@@ -91,11 +91,11 @@ constexpr const char* kJobListPageHtml =
   }
 }
 @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-@keyframes waveBob{0%,100%{background-position-x:0}50%{background-position-x:20px}}
+@keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
 body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
-header{padding-bottom:.75rem;margin-bottom:.75rem;position:relative}
+header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
 header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
-header::after{content:"";position:absolute;left:0;right:0;bottom:-7px;height:14px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveBob 3s ease-in-out infinite}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
 .job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
 .job h3{margin:0 0 .25rem;font-size:1rem}
 .job button{margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);transition:border-color .15s ease,transform .1s ease}

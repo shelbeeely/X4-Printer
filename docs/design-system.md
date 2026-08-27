@@ -164,13 +164,16 @@ box-shadow: 0 1px 2px rgba(58, 33, 21, 0.08);
 
 Every surface's header bar gets a two-tone wavy SVG divider along its bottom
 edge instead of a plain border — a repeating background-image data URI
-(gold wave layered over a translucent rust wave), animated with a slow
-horizontal `waveBob` drift:
+(gold wave layered over a translucent rust wave), animated with a continuous
+`waveScroll` drift that reads as an infinite scroll rather than a back-and-
+forth bob: the keyframe moves `background-position-x` by exactly one tile
+width (40px, matching the SVG tile's own width) with a `linear` timing
+function, so the pattern wraps seamlessly with no visible reset:
 
 ```css
-@keyframes waveBob {
-  0%, 100% { background-position-x: 0; }
-  50% { background-position-x: 20px; }
+@keyframes waveScroll {
+  from { background-position-x: 0; }
+  to { background-position-x: 40px; }
 }
 ```
 
@@ -190,7 +193,7 @@ a real library/WASM but this one doesn't):
   sections (`opacity`/`translateY(10–14px)` → resting state), staggered by
   ~0.05–0.06s per sibling where multiple cards enter together (stat grids,
   card grids).
-- **`waveBob`** — the header divider's slow horizontal drift, above.
+- **`waveScroll`** — the header divider's continuous, one-directional drift, above.
 - **`ctaGlow`** — a soft pulsing `box-shadow` on primary buttons only.
 
 CSS animations were sufficient for this goal (no library needed); the X4's
