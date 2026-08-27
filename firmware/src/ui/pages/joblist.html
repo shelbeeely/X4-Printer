@@ -33,6 +33,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{o
 .signal-weak{color:var(--danger);border-color:var(--danger)}
 #sync-banner{color:var(--muted);font-size:.85rem;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:.5rem .75rem;margin:.5rem 0}
 #activity-link{font-size:.85rem}
+#activity-list{list-style:none;margin:.3rem 0 0;padding:0;font-size:.8rem;color:var(--muted)}
+#activity-list li{padding:.2rem 0;border-bottom:1px solid var(--border)}
+#activity-list li:last-child{border-bottom:none}
 details#diag{margin:.5rem 0;font-size:.85rem;color:var(--muted)}
 details#diag summary{cursor:pointer;font-weight:600;color:var(--fg)}
 details#diag p{margin:.3rem 0}
@@ -58,7 +61,7 @@ details#diag p{margin:.3rem 0}
 </header>
 <p id="status" aria-live="polite" aria-atomic="true">Loading...</p>
 <p id="sync-banner" style="display:none"></p>
-<p id="activity-link" style="display:none"><a id="activity-link-a" href="#" target="_blank" rel="noopener">Recent activity</a></p>
+<div id="activity-link" style="display:none"><a id="activity-link-a" href="#" target="_blank" rel="noopener">Recent activity</a><ul id="activity-list"></ul></div>
 <details id="diag">
   <summary>Device info</summary>
   <div id="diag-body"></div>
@@ -113,17 +116,55 @@ async function refreshStatus() {
 }
 
 // Station mode + admin console only, same gating as the per-job "View full
-// document" link — a plain target=_blank navigation straight to the Pi
-// (not proxied through the X4), same reasoning: a fetch() here would be a
-// cross-origin request, and admin_api.py sends no CORS headers (see
-// docs/architecture.md "On-device Web UI full-document preview" for why
-// that's the deliberate choice over adding CORS support).
+// document" link. Unlike that link (and the thumbnails), this one now also
+// fetch()es its own URL with credentials: "include" and renders the result
+// inline — admin_api.py's devices/{id}/approvals route replies with
+// reflected-origin CORS + Allow-Credentials specifically for this, so the
+// browser attaches its cached Basic-auth credentials cross-origin (see
+// docs/architecture.md's note on this route and docs/security.md "Admin web
+// console"). The <a> stays as a "view all"/fallback link regardless of
+// whether the inline fetch succeeds.
+let activityLoaded = false;
+
 function renderActivityLink() {
   const el = document.getElementById('activity-link');
   if (!piAdminBaseUrl || !deviceId) { el.style.display = 'none'; return; }
-  document.getElementById('activity-link-a').href =
-    piAdminBaseUrl + '/api/admin/v1/devices/' + encodeURIComponent(deviceId) + '/approvals';
+  const url = piAdminBaseUrl + '/api/admin/v1/devices/' + encodeURIComponent(deviceId) + '/approvals';
+  document.getElementById('activity-link-a').href = url;
   el.style.display = 'block';
+  // Fetched once, not on every status poll — this is history, not live data.
+  if (!activityLoaded) {
+    activityLoaded = true;
+    loadActivityList(url);
+  }
+}
+
+function formatActivityItem(a) {
+  const label = a.job_title || a.job_id;
+  const when = new Date(a.received_at * 1000).toLocaleString();
+  return label + ' – ' + a.action + ' (' + when + ')';
+}
+
+// Fails soft on any error (network, non-2xx, or a CORS failure) — same
+// "worst case is nothing shown" philosophy as the thumbnail <img>'s
+// onerror above: leave the list empty rather than throwing, and the "view
+// all" <a> is still there as a fallback.
+async function loadActivityList(url) {
+  const list = document.getElementById('activity-list');
+  try {
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const approvals = data.approvals || [];
+    list.innerHTML = '';
+    for (const a of approvals) {
+      const li = document.createElement('li');
+      li.textContent = formatActivityItem(a);
+      list.appendChild(li);
+    }
+  } catch (e) {
+    // network error or CORS failure — leave the list as-is (empty).
+  }
 }
 
 function renderConnectivity(s) {
