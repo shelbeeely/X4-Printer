@@ -112,12 +112,22 @@ async function loadJobs() {
   const tbody = document.querySelector("#jobs-table tbody");
   tbody.replaceChildren();
   if (jobs.length === 0) {
-    tbody.appendChild(el("tr", {}, [el("td", { class: "empty", colspan: "8", text: "No jobs yet." })]));
+    tbody.appendChild(el("tr", {}, [el("td", { class: "empty", colspan: "9", text: "No jobs yet." })]));
     return;
   }
   for (const job of jobs) {
+    const thumbImg = el("img", {
+      class: "job-thumb",
+      loading: "lazy",
+      alt: "",
+      src: `${API}/jobs/${encodeURIComponent(job.job_id)}/thumbnail`,
+    });
+    // Jobs ingested before thumbnails existed have no thumbnail_path, so the
+    // request 404s — just hide the image rather than showing a broken icon.
+    thumbImg.onerror = () => thumbImg.remove();
     tbody.appendChild(
       el("tr", {}, [
+        el("td", {}, [thumbImg]),
         el("td", { text: job.title }),
         el("td", { text: job.status }),
         el("td", { text: String(job.page_count) }),
