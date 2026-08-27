@@ -19,6 +19,12 @@ db.py's SCHEMA: approvals.device_id has no FK constraint, so this is
 safe). "requeue" and "purge" have no direct-sync-API equivalent and are
 admin-only, backed by the new db.py methods.
 
+GET .../jobs/{id}/original streams the untouched original document
+(never converted to XTC) — reusing this exact same admin password gate
+lets a phone browsing the X4's on-device web UI in station mode fetch it
+directly from the Pi, entirely bypassing the X4 (see
+docs/architecture.md "On-device Web UI full-document preview").
+
 See docs/security.md "Admin web console" for the trust-boundary writeup.
 """
 
@@ -164,6 +170,8 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_status()
         elif rest == ["jobs"]:
             self._handle_list_jobs()
+        elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "original":
+            self._handle_get_original(rest[1])
         elif rest == ["devices"]:
             self._handle_list_devices()
         elif rest == ["approvals"]:
@@ -232,6 +240,32 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             for row in self.db.list_jobs_for_admin()
         ]
         self._send_json(200, {"jobs": jobs})
+
+    def _handle_get_original(self, job_id: str) -> None:
+        """Streams the untouched original document (the file printer_forward
+        never sees — only convert.py's XTC output goes to the X4) so a phone
+        browsing the X4's on-device web UI in station mode can preview the
+        real document, not just its e-ink rendition. Gated by the same admin
+        password as everything else here (see module docstring) — the phone
+        fetches this URL directly, bypassing the X4 entirely, so nothing here
+        is stored on the device (see docs/architecture.md "On-device Web UI
+        full-document preview")."""
+        job = self.db.get_job(job_id)
+        if job is None:
+            self._send_json(404, {"error": "job not found"})
+            return
+        try:
+            data = Path(job["original_path"]).read_bytes()
+        except OSError:
+            self._send_json(404, {"error": "original not found"})
+            return
+        content_type = job["original_mime"] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", "inline")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _handle_job_action(self, job_id: str) -> None:
         body = self._read_json_body()

@@ -236,6 +236,45 @@ easy reach, or (hotspot mode) away from any known network entirely.
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
 
+### On-device Web UI full-document preview
+
+The job-list page's "Preview" button (`ui/pages/joblist.html`, see
+`tools/xtc-wasm/README.md`) decodes the X4's own converted XTC bitmap —
+useful everywhere, including hotspot mode, but it's the e-ink rendition,
+not the original document. In **station mode only** (the X4 joined to a
+real network, not its own isolated hotspot), the job-list page also shows
+a "View full document" link per job that opens the Pi's untouched
+original (`pi-server`'s `originals_dir` — see `docs/architecture.md`
+"Data model") directly in the phone's browser.
+
+This is a deliberately different shape from the WASM preview, not an
+extension of it:
+
+- **The X4 never touches these bytes.** The link points the phone straight
+  at the Pi's admin console (`GET /api/admin/v1/jobs/{id}/original`,
+  `admin_api.py`) — a normal top-level navigation/new-tab open, not a
+  fetch the X4 proxies. Nothing is downloaded to, cached on, or streamed
+  through the device; the whole point is that the original never needs to
+  fit in the X4's flash or RAM budget the way an XTC page does.
+- **Auth is the existing admin console password, reused as-is** — no new
+  token-issuance mechanism. The Pi's `GET /api/admin/v1/jobs/{id}/original`
+  route (`admin_api.py`) is gated by the exact same shared HTTP Basic
+  check every other admin-console route already uses; the browser's own
+  native password prompt handles it, so neither the X4 nor this page needs
+  any client-side auth code for it. This only works at all when the Pi
+  owner has set an admin password (`XTEINK_ADMIN_PASSWORD`) — if not, the
+  link is simply never shown (see below), the same "empty disables"
+  pattern the admin console and relay already use.
+- **Wired at pairing time, not discovered at runtime.** `pair_device.py`
+  writes an optional `pi_admin_base_url` field into `/system/device.json`
+  only when the admin console is enabled at pairing time (mirroring how
+  the relay fields are only written when relay is configured) —
+  `config::DeviceConfigData::hasAdminConsole`/`piAdminBaseUrl`. `/api/status`
+  only ever includes `pi_admin_base_url` in its response when
+  `hasAdminConsole` is set *and* the server is currently in station mode —
+  hotspot mode's phone has no network path to the Pi at all, so the field
+  (and the link) is omitted rather than shown-but-broken.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,

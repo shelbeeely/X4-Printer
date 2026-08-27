@@ -23,9 +23,9 @@ header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:4
 header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
 .job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
 .job h3{margin:0 0 .25rem;font-size:1rem}
-.job button{margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);transition:border-color .15s ease,transform .1s ease}
-.job button:hover{border-color:var(--accent)}
-.job button:active{transform:scale(.96)}
+.job button,.job a{display:inline-block;margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);text-decoration:none;transition:border-color .15s ease,transform .1s ease}
+.job button:hover,.job a:hover{border-color:var(--accent)}
+.job button:active,.job a:active{transform:scale(.96)}
 .job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
 #status{color:var(--muted);font-size:.85rem}
 </style></head><body>
@@ -33,12 +33,20 @@ header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24
 <p id="status">Loading...</p>
 <div id="jobs"></div>
 <script>
+// Set only in station mode, and only when this device was paired against a
+// Pi with the admin console enabled (see docs/architecture.md "On-device
+// Web UI full-document preview") — lets refreshJobs() link straight to the
+// Pi for the untouched original document, fetched by the browser directly
+// (never proxied through or stored on the X4).
+let piAdminBaseUrl = null;
+
 async function refreshStatus() {
   const r = await fetch('/api/status');
   if (!r.ok) return;
   const s = await r.json();
   document.getElementById('status').textContent =
     s.device_name + ' - ' + s.unread_count + ' unread of ' + s.job_count;
+  piAdminBaseUrl = s.pi_admin_base_url || null;
 }
 async function refreshJobs() {
   const r = await fetch('/api/jobs');
@@ -75,6 +83,14 @@ async function refreshJobs() {
       previewBtn.onclick = () => preview(j.job_id, canvas);
       div.appendChild(previewBtn);
       div.appendChild(canvas);
+      if (piAdminBaseUrl) {
+        const docLink = document.createElement('a');
+        docLink.textContent = 'View full document';
+        docLink.href = piAdminBaseUrl + '/api/admin/v1/jobs/' + encodeURIComponent(j.job_id) + '/original';
+        docLink.target = '_blank';
+        docLink.rel = 'noopener';
+        div.appendChild(docLink);
+      }
     }
     el.appendChild(div);
   }
@@ -156,7 +172,11 @@ async function preview(jobId, canvas) {
     }
   }
 }
-refreshStatus();
-refreshJobs();
-setInterval(() => { refreshStatus(); refreshJobs(); }, 20000);
+// refreshJobs() reads piAdminBaseUrl, which only refreshStatus() sets —
+// sequenced (not fired concurrently) so the "View full document" link
+// can't be silently omitted by refreshJobs() winning the race on a slow
+// /api/status response.
+async function refreshAll() { await refreshStatus(); await refreshJobs(); }
+refreshAll();
+setInterval(refreshAll, 20000);
 </script></body></html>

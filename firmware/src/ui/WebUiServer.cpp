@@ -233,6 +233,13 @@ void WebUiServer::handleApiStatus() {
   }
   doc["job_count"] = total;
   doc["unread_count"] = unread;
+  // Only in station mode: hotspot mode's phone has no network path to the
+  // Pi at all (see docs/architecture.md "On-device Web UI full-document
+  // preview"), so there's nothing useful to link to there even if this
+  // device happens to have been paired with the admin console enabled.
+  if (mode_ == WebUiMode::Station && deviceConfig_ != nullptr && deviceConfig_->hasAdminConsole) {
+    doc["pi_admin_base_url"] = deviceConfig_->piAdminBaseUrl;
+  }
 
   String out;
   serializeJson(doc, out);

@@ -115,6 +115,42 @@ def test_list_jobs(running_admin_api):
     assert job["last_action"] is None
 
 
+def test_get_original_streams_untouched_file(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+
+    resp = _get(f"{base}/jobs/{job_id}/original")
+    assert resp.headers["Content-Type"] == "application/pdf"
+    assert resp.read() == b"%PDF-fake-bytes"
+
+
+def test_get_original_requires_auth(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/{job_id}/original", password=None)
+    assert exc.value.code == 401
+
+
+def test_get_original_unknown_job_404s(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/does-not-exist/original")
+    assert exc.value.code == 404
+
+
+def test_get_original_missing_file_404s(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    row = db.get_job(job_id)
+    from pathlib import Path
+
+    Path(row["original_path"]).unlink()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/{job_id}/original")
+    assert exc.value.code == 404
+
+
 def test_job_action_print_reuses_apply_approval(running_admin_api, fake_lp_binary):
     base, db, config = running_admin_api
     job_id = _insert_job(db, config)
