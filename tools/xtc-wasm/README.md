@@ -21,10 +21,13 @@ python3 ../../firmware/src/ui/wasm/generate_header.py
 
 `build.sh` writes `xtc_decoder.wasm`/`xtc_decoder.js` into
 `firmware/src/ui/wasm/` (committed — small, ~9KB + ~18KB). The header
-generator turns those into `firmware/src/ui/XtcDecoderWasmData.h`
-(committed, generated — `WebUiServer.cpp` `#include`s it directly, no
-filesystem access needed on the device). Commit all three regenerated
-files together whenever `xtc_decoder.cpp` changes.
+generator gzip-compresses both (~3.7KB + ~5.7KB — see
+`firmware/src/ui/wasm/generate_header.py`'s docstring for the exact
+numbers) into `firmware/src/ui/XtcDecoderWasmData.h` (committed,
+generated — `WebUiServer.cpp` `#include`s it directly and serves both
+with a `Content-Encoding: gzip` header via its `sendGzip()` helper, no
+filesystem access or on-device compression needed). Commit all three
+regenerated files together whenever `xtc_decoder.cpp` changes.
 
 CI (`.github/workflows/tests.yml`) rebuilds from source on every push and
 fails if either the `.wasm`/`.js` or the generated header no longer

@@ -206,7 +206,7 @@ described in `tools/xtc-wasm/README.md`.
 |---|---|---|
 | GitHub Pages site | `site/assets/style.css` | Canonical source of the shared tokens (font `@import` lives here; all four site pages share this one file). |
 | Pi admin console | `pi-server/xteink_print_server/admin_ui/style.css` | Font `@import` at the top of the stylesheet, same as the site. |
-| X4 on-device web UI | `firmware/src/ui/WebUiServer.cpp` | Inline `<style>` blocks inside `kLoginPageHtml` and `kJobListPageHtml`, each with a non-blocking font `<link>` pair (`rel="preload"` + a `media="print"`/`onload` swap, so a stalled fetch in hotspot mode can't hold up first paint) in place of the `@import` the other two surfaces use. The wrong-PIN error page in `handleLogin()` is a bare `<style>`/`<p>` fragment with no `<head>` of its own — it has no font `<link>` and simply renders in the fallback stack. |
+| X4 on-device web UI | `firmware/src/ui/pages/{login,joblist}.html` | `<style>` blocks inside each page, each with a non-blocking font `<link>` pair (`rel="preload"` + a `media="print"`/`onload` swap, so a stalled fetch in hotspot mode can't hold up first paint) in place of the `@import` the other two surfaces use. Both pages are embedded gzip-compressed into `firmware/src/ui/PagesData.h` (see that directory's `README.md`) — edit the `.html` source, not the generated header. The wrong-PIN error page in `WebUiServer.cpp`'s `handleLogin()` is a bare `<style>`/`<p>` fragment with no `<head>` of its own — it has no font `<link>` and simply renders in the fallback stack. |
 
 There is no shared build system tying these three together — different
 languages, different deployments, no bundler or imported stylesheet linking

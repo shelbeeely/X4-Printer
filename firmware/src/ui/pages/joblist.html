@@ -1,0 +1,162 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X4 Print Inbox</title>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
+  --accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
+    --accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810;
+  }
+}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
+body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
+header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
+header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
+.job{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both}
+.job h3{margin:0 0 .25rem;font-size:1rem}
+.job button{margin-right:.4rem;padding:.4rem .8rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);transition:border-color .15s ease,transform .1s ease}
+.job button:hover{border-color:var(--accent)}
+.job button:active{transform:scale(.96)}
+.job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
+#status{color:var(--muted);font-size:.85rem}
+</style></head><body>
+<header><h1>Print Inbox</h1></header>
+<p id="status">Loading...</p>
+<div id="jobs"></div>
+<script>
+async function refreshStatus() {
+  const r = await fetch('/api/status');
+  if (!r.ok) return;
+  const s = await r.json();
+  document.getElementById('status').textContent =
+    s.device_name + ' - ' + s.unread_count + ' unread of ' + s.job_count;
+}
+async function refreshJobs() {
+  const r = await fetch('/api/jobs');
+  if (!r.ok) return;
+  const data = await r.json();
+  const el = document.getElementById('jobs');
+  el.innerHTML = '';
+  if (data.jobs.length === 0) { el.innerHTML = '<p>Inbox empty.</p>'; return; }
+  for (const j of data.jobs) {
+    const div = document.createElement('div');
+    div.className = 'job';
+    const h = document.createElement('h3');
+    h.textContent = j.title + ' (' + j.page_count + ' pg)';
+    div.appendChild(h);
+    if (j.pending_approval) {
+      const p = document.createElement('p');
+      p.textContent = 'Action queued, syncing...';
+      div.appendChild(p);
+    } else {
+      for (const pair of [['Print','print'], ['Keep','keep'], ['Delete','delete']]) {
+        const b = document.createElement('button');
+        b.textContent = pair[0];
+        b.onclick = () => act(j.job_id, pair[1]);
+        div.appendChild(b);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.style.display = 'none';
+      canvas.style.maxWidth = '100%';
+      canvas.style.marginTop = '.5rem';
+      canvas.style.border = '1px solid var(--border)';
+      canvas.style.borderRadius = '10px';
+      const previewBtn = document.createElement('button');
+      previewBtn.textContent = 'Preview';
+      previewBtn.onclick = () => preview(j.job_id, canvas);
+      div.appendChild(previewBtn);
+      div.appendChild(canvas);
+    }
+    el.appendChild(div);
+  }
+}
+async function act(jobId, action) {
+  await fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({job_id: jobId, action: action})});
+  refreshJobs();
+}
+
+// Client-side XTC decode (tools/xtc-wasm/), entirely offline once
+// xtc-decoder.js/.wasm are fetched from this device — no CDN, no external
+// libraries, matches the hotspot mode's no-internet-access constraint.
+let xtcModulePromise = null;
+function loadXtcModule() {
+  if (!xtcModulePromise) {
+    xtcModulePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/xtc-decoder.js';
+      script.onload = () => {
+        createXtcDecoderModule({locateFile: () => '/xtc-decoder.wasm'}).then(resolve, reject);
+      };
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  return xtcModulePromise;
+}
+async function preview(jobId, canvas) {
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  canvas.width = 200; canvas.height = 40;
+  ctx.font = '14px sans-serif';
+  ctx.fillText('Loading preview...', 4, 20);
+  let mod = null, inPtr = 0, widthPtr = 0, heightPtr = 0, outPtr = 0;
+  try {
+    // Independent I/O — overlap the module load with the file fetch
+    // instead of paying both latencies back-to-back.
+    const [loadedMod, r] = await Promise.all([
+      loadXtcModule(),
+      fetch('/api/jobs/xtc?job_id=' + encodeURIComponent(jobId)),
+    ]);
+    mod = loadedMod;
+    if (!r.ok) throw new Error('fetch failed');
+    const bytes = new Uint8Array(await r.arrayBuffer());
+
+    inPtr = mod._malloc(bytes.length);
+    widthPtr = mod._malloc(2);
+    heightPtr = mod._malloc(2);
+    if (!inPtr || !widthPtr || !heightPtr) throw new Error('out of memory');
+    mod.HEAPU8.set(bytes, inPtr);
+    outPtr = mod._xtc_decode_page(inPtr, bytes.length, 0, widthPtr, heightPtr);
+    if (outPtr === 0) throw new Error('decode failed');
+
+    const width = mod.HEAPU16[widthPtr >> 1];
+    const height = mod.HEAPU16[heightPtr >> 1];
+    const gray = mod.HEAPU8.subarray(outPtr, outPtr + width * height);
+    canvas.width = width;
+    canvas.height = height;
+    const imgData = ctx.createImageData(width, height);
+    for (let i = 0; i < width * height; i++) {
+      const v = gray[i];
+      imgData.data[i * 4] = v;
+      imgData.data[i * 4 + 1] = v;
+      imgData.data[i * 4 + 2] = v;
+      imgData.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } catch (e) {
+    canvas.width = 200; canvas.height = 40;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillText('Preview unavailable.', 4, 20);
+  } finally {
+    if (mod) {
+      if (inPtr) mod._free(inPtr);
+      if (widthPtr) mod._free(widthPtr);
+      if (heightPtr) mod._free(heightPtr);
+      if (outPtr) mod._xtc_free(outPtr);
+    }
+  }
+}
+refreshStatus();
+refreshJobs();
+setInterval(() => { refreshStatus(); refreshJobs(); }, 20000);
+</script></body></html>

@@ -23,8 +23,11 @@
 // Also serves tools/xtc-wasm/'s compiled WASM decoder (embedded via
 // ui/XtcDecoderWasmData.h) and a raw-bytes route for a job's XTC file, so
 // the job list page can decode and preview a page entirely client-side —
-// see ui/WebUiServer.cpp's kJobListPageHtml script for the fetch/decode
-// glue.
+// see ui/pages/joblist.html's script for the fetch/decode glue. Both
+// on-device pages (ui/pages/login.html, ui/pages/joblist.html) and the
+// WASM decoder's .wasm/.js are embedded gzip-compressed (ui/PagesData.h,
+// ui/XtcDecoderWasmData.h) and served via sendGzip() below — see
+// ui/pages/generate_pages_header.py for why.
 
 namespace ui {
 
@@ -117,6 +120,13 @@ class WebUiServer {
   void handleXtcDecoderWasm();
   void handleXtcDecoderJs();
   void handleNotFound();
+
+  // Shared by every route serving one of the gzip-embedded static assets
+  // (firmware/src/ui/PagesData.h, XtcDecoderWasmData.h) — every browser
+  // capable of running this UI's client-side WASM decode also
+  // unconditionally supports gzip response decoding, so this is used
+  // without checking the request's Accept-Encoding header.
+  void sendGzip(int code, const char* contentType, const unsigned char* data, size_t len);
 };
 
 }  // namespace ui
