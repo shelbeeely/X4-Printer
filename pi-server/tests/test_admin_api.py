@@ -297,6 +297,66 @@ def test_device_approvals_scoped_to_one_device(running_admin_api):
     assert resp["approvals"][0]["approval_id"] == "a1"
 
 
+def test_device_approvals_cors_headers_reflect_origin(running_admin_api):
+    # The X4 page's fetch(url, {credentials: "include"}) needs the actual
+    # Origin reflected back (never "*", which browsers reject for
+    # credentialed requests) plus Allow-Credentials, on the real GET.
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    db.record_approval_if_new(
+        approval_id="a1", device_id=DEVICE_ID, job_id=job_id, action="print", created_at=1, received_via="direct"
+    )
+    origin = "http://x4-device.local:80"
+
+    resp = _get(f"{base}/devices/{DEVICE_ID}/approvals", headers={"Origin": origin})
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+    assert json.loads(resp.read())["approvals"][0]["approval_id"] == "a1"
+
+
+def test_device_approvals_other_routes_have_no_cors_headers(running_admin_api):
+    # CORS is scoped to devices/{id}/approvals only — original/thumbnail
+    # are loaded via <a>/<img>, which never trigger CORS enforcement, so no
+    # headers are needed or wanted there.
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    resp = _get(f"{base}/jobs/{job_id}/original", headers={"Origin": "http://x4-device.local"})
+    assert "Access-Control-Allow-Origin" not in resp.headers
+
+
+def test_device_approvals_preflight_options(running_admin_api):
+    base, _db, _config = running_admin_api
+    origin = "http://x4-device.local:80"
+    req = urllib.request.Request(
+        f"{base}/devices/{DEVICE_ID}/approvals", method="OPTIONS", headers={"Origin": origin}
+    )
+    resp = urllib.request.urlopen(req, timeout=5)
+    assert resp.status == 204
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+    assert resp.headers["Access-Control-Allow-Methods"] == "GET"
+    assert resp.headers["Access-Control-Allow-Headers"] == "Authorization"
+
+
+def test_preflight_options_does_not_require_auth(running_admin_api):
+    # Preflight requests never carry credentials — that's expected, not a
+    # bug — so do_OPTIONS must not gate on _authenticate().
+    base, _db, _config = running_admin_api
+    req = urllib.request.Request(
+        f"{base}/devices/{DEVICE_ID}/approvals", method="OPTIONS", headers={"Origin": "http://x4-device.local"}
+    )
+    resp = urllib.request.urlopen(req, timeout=5)  # no Authorization header at all
+    assert resp.status == 204
+
+
+def test_preflight_options_unmatched_path_404s(running_admin_api):
+    base, _db, _config = running_admin_api
+    req = urllib.request.Request(f"{base}/jobs", method="OPTIONS", headers={"Origin": "http://x4-device.local"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 404
+
+
 def test_device_approvals_unknown_device_returns_empty_not_404(running_admin_api):
     # Unlike revoke/rotate-token, this route doesn't check "device exists"
     # first — a revoked device's history is still valid history to show.

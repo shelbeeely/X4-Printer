@@ -313,13 +313,25 @@ gating:
   (using the existing `idx_approvals_device` index) backs
   `GET /api/admin/v1/devices/{id}/approvals` — scoped to one device's own
   approval history (not the whole household's), reusing `device_id` from
-  `/api/status`. Rendered as one more `<a target="_blank">` link, for the
-  same reason as "View full document": a `fetch()` here would be a
-  cross-origin request, and `admin_api.py` sends no CORS headers to any
-  route — adding CORS support (correctly — reflecting the X4's specific
-  origin, never `*`, since responses carry job titles/approval detail) is
-  a real option for a nicer inline list, but a deliberately separate
-  follow-up, not bundled into this feature.
+  `/api/status`. Unlike "View full document" and the thumbnails, this route
+  is now CORS-enabled (`admin_api.py`'s `_send_cors_headers()` plus a
+  `do_OPTIONS` preflight handler, both scoped to this one route only), so
+  `joblist.html` renders the approval history inline via its own
+  `fetch(url, { credentials: "include" })` instead of only linking out. The
+  CORS response reflects the request's actual `Origin` header value — never
+  `Access-Control-Allow-Origin: *`, which the CORS spec disallows for
+  credentialed requests and which would be wrong here anyway since
+  responses carry job titles/approval detail — and pairs it with
+  `Access-Control-Allow-Credentials: true` so the browser attaches its
+  cached Basic-auth credentials cross-origin. Because `Authorization` isn't
+  a CORS-safelisted header, the browser sends a preflight `OPTIONS` first;
+  that preflight is answered without calling `_authenticate()` (preflight
+  requests never carry credentials, by design — nothing to authenticate
+  yet) and returns `Allow-Methods: GET`/`Allow-Headers: Authorization`. The
+  `<a target="_blank">` link is kept alongside the inline list as a
+  fallback/"view all", and the inline fetch fails soft (leaves the list
+  empty) on any network error, non-2xx status, or CORS failure — same
+  "worst case is nothing shown" rule as the thumbnails.
 
 ## Memory budget (ESP32-C3, firmware)
 

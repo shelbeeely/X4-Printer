@@ -116,13 +116,32 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    # -- CORS -----------------------------------------------------------------
+
+    def _send_cors_headers(self) -> None:
+        """Reflects the request's Origin back verbatim (never `*`) with
+        Allow-Credentials — required because the X4 page's own fetch() uses
+        credentials: "include" so the browser attaches its cached Basic-auth
+        credentials cross-origin, and `*` is invalid/ignored by browsers for
+        credentialed requests per the CORS spec. Only ever called for
+        GET/OPTIONS on the one route (devices/{id}/approvals) the X4 page
+        fetches inline — see docs/security.md "Admin web console" and
+        docs/architecture.md's note on this route for why this doesn't widen
+        what the admin password already grants."""
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+
     # -- response helpers -----------------------------------------------------
 
-    def _send_json(self, status: int, payload: dict) -> None:
+    def _send_json(self, status: int, payload: dict, *, cors: bool = False) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if cors:
+            self._send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -203,6 +222,31 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_rotate_token(rest[1])
         elif rest == ["settings"]:
             self._handle_post_settings()
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """CORS preflight for the one credentialed cross-origin route
+        (devices/{id}/approvals) — no _authenticate() call here, deliberately:
+        preflight OPTIONS requests never carry credentials (that's the
+        browser's doing, not a bug to work around), so gating this on the
+        admin password would just make every preflight fail and the real GET
+        would never be attempted. Any other path 404s the same way unmatched
+        do_GET/do_POST routes do."""
+        parsed = urlsplit(self.path)
+        parts = [p for p in parsed.path.split("/") if p]
+        if parts[:3] != ["api", "admin", "v1"]:
+            self._send_json(404, {"error": "not found"})
+            return
+        rest = parts[3:]
+
+        if len(rest) == 3 and rest[0] == "devices" and rest[2] == "approvals":
+            self.send_response(204)
+            self._send_cors_headers()
+            self.send_header("Access-Control-Allow-Methods", "GET")
+            self.send_header("Access-Control-Allow-Headers", "Authorization")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -396,9 +440,14 @@ class AdminApiHandler(BaseHTTPRequestHandler):
         device's device_id still has valid historical approval rows
         (delete_device leaves approvals alone — no FK constraint), and
         showing history for a just-revoked device from this same admin
-        console is reasonable, not an error case."""
+        console is reasonable, not an error case.
+
+        CORS-enabled (reflected origin + credentials, see
+        _send_cors_headers) — the only route on this handler that is, since
+        it's the only one the X4 page's own inline fetch() calls
+        cross-origin; see docs/security.md "Admin web console"."""
         approvals = [dict(row) for row in self.db.list_recent_approvals_for_device(device_id, limit=10)]
-        self._send_json(200, {"approvals": approvals})
+        self._send_json(200, {"approvals": approvals}, cors=True)
 
     # -- handlers: settings -----------------------------------------------------
 
