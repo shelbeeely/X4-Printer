@@ -277,7 +277,8 @@ void initApp(App& app, InboxUiState& state) {
   // setup() before this call — see InboxUI.h's InboxUiState comment for
   // why webUiServer takes these post-construction rather than as
   // reference members.
-  state.webUiServer.attach(state.jobs, state.outbox, state.deviceConfig);
+  state.webUiServer.attach(state.jobs, state.outbox, state.deviceConfig, state.panelWidth, state.panelHeight,
+                            state.wakeMillis);
 
   app.on(
       ActionOpenJob,

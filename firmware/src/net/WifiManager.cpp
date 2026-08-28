@@ -70,6 +70,8 @@ String WifiManager::currentSsid() const { return WiFi.SSID(); }
 
 String WifiManager::currentIp() const { return WiFi.localIP().toString(); }
 
+int32_t WifiManager::rssi() const { return WiFi.RSSI(); }
+
 bool WifiManager::startAccessPoint(const char* ssid, const char* password) {
   WiFi.mode(WIFI_AP);
   // softAP() requires an 8+ character password (or empty for an open

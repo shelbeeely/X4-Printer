@@ -1,4 +1,4 @@
-# Runs the project's four independent test suites (see README.md's
+# Runs the project's six independent test suites (see README.md's
 # "Running the tests" section):
 #
 #   - pi-server-tests:   Pi server unit tests (pi-server/tests, pytest)
@@ -9,6 +9,16 @@
 #                        uses — needs pi-server's dependencies importable
 #   - firmware-host-tests: firmware's pure-logic modules built and run as
 #                        plain C++17 (firmware/test), no board required
+#   - xtc-wasm-regenerate-check: rebuilds tools/xtc-wasm/'s WASM decoder
+#     from source and fails if the committed firmware/src/ui/wasm/*
+#     output or the generated firmware/src/ui/XtcDecoderWasmData.h header
+#     has drifted from what a fresh build produces. Unlike the ESP32
+#     firmware build, emscripten installs reliably via apt in CI, so this
+#     is a required check, not a best-effort one.
+#   - pages-regenerate-check: reruns firmware/src/ui/pages/
+#     generate_pages_header.py (pure Python, gzips login.html/joblist.html
+#     — no emscripten needed) and fails if the committed
+#     firmware/src/ui/PagesData.h has drifted from a fresh run.
 #
 # Each suite is a separate job so a failure is attributable to the right
 # component in the GitHub UI. CI installs dependencies directly into the
@@ -104,3 +114,41 @@ jobs:
       - name: Run ctest
         working-directory: firmware/test
         run: ctest --test-dir build --output-on-failure
+
+  xtc-wasm-regenerate-check:
+    name: XTC WASM decoder regenerate check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install emscripten
+        run: sudo apt-get update && sudo apt-get install -y emscripten
+
+      - name: Rebuild WASM decoder
+        run: bash tools/xtc-wasm/build.sh
+
+      - name: Regenerate embedded header
+        run: python3 firmware/src/ui/wasm/generate_header.py
+
+      - name: Fail if committed output has drifted
+        run: git diff --exit-code -- firmware/src/ui/wasm firmware/src/ui/XtcDecoderWasmData.h
+
+  pages-regenerate-check:
+    name: X4 web UI pages regenerate check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Regenerate embedded header
+        run: python3 firmware/src/ui/pages/generate_pages_header.py
+
+      - name: Fail if committed output has drifted
+        run: git diff --exit-code -- firmware/src/ui/PagesData.h

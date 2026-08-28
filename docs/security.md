@@ -113,15 +113,65 @@ the physical UI.
   (`tools/gen_selfsigned_cert.py`).
 - **What a logged-in admin can do**: see every job's title/size/status and
   every paired device's name, reprint/keep/archive/requeue/purge any job,
-  revoke or rotate any device's token, and edit `cups_queue`,
-  `retention_days`, and the relay fields live. This is meaningfully more
-  powerful than the sync API (which only ever acts on the one device
-  presenting a valid token for itself) — treat the admin password with at
-  least the same care as the relay account token, and don't port-forward
-  this any more than you would the sync API.
+  revoke or rotate any device's token, edit `cups_queue`,
+  `retention_days`, and the relay fields live, and — as of the on-device
+  Web UI's full-document preview feature and its later thumbnail/recent-
+  activity extensions — download any job's untouched original document
+  (`GET .../jobs/{id}/original`), its thumbnail (`GET
+  .../jobs/{id}/thumbnail`), and any device's approval history (`GET
+  .../devices/{id}/approvals`). This is meaningfully more powerful than
+  the sync API (which only ever acts on the one device presenting a valid
+  token for itself) — treat the admin password with at least the same
+  care as the relay account token, and don't port-forward this any more
+  than you would the sync API.
+- **All three of those routes are reachable from any device that knows
+  the admin password**, not just the paired X4 — by design, since the
+  whole point (see `docs/architecture.md` "On-device Web UI full-document
+  preview") is that a phone's browser fetches them directly, bypassing the
+  X4 entirely. None of them widen what the password already grants: a
+  logged-in admin could already read `original_bytes`/`original_mime`
+  metadata for every job via `GET .../jobs`, and every device's approval
+  history via the existing unfiltered `GET .../approvals` — these routes
+  just serve the same underlying data pre-filtered or as raw bytes instead
+  of metadata.
 - **No rate limiting or lockout** on repeated failed Basic-auth attempts —
   same "no rate limiting" gap already documented below for the other
   listeners, not something this feature adds beyond what already exists.
+- **`GET .../devices/{id}/approvals` is CORS-enabled**, uniquely among
+  these routes — the X4 page (`joblist.html`) fetches it directly, inline,
+  from its own origin (a different host/port than the Pi), which browsers
+  only allow with the right CORS response. That response reflects the
+  request's actual `Origin` header (never `Access-Control-Allow-Origin:
+  *`, which is invalid for credentialed requests and would defeat the
+  point of gating this behind the admin password) and sets
+  `Access-Control-Allow-Credentials: true` so the browser attaches its
+  cached Basic-auth credentials cross-origin; a preflight `OPTIONS`
+  request (required because `Authorization` isn't a CORS-safelisted
+  header) is answered the same way but without an auth check, since
+  preflights never carry credentials. `original` and `thumbnail` stay
+  CORS-free — they're loaded via `<a>`/`<img>`, which never trigger CORS
+  enforcement in the first place, so there's nothing to add.
+
+  Worth being precise about what this *does* change: any origin can send
+  the preflight and get a reflected `Allow-Origin`, so the gate is still
+  the admin password/cached Basic-auth, not the origin check — the same
+  trust boundary `original`/`thumbnail` already rely on (a browser that
+  has ever authenticated to the Pi attaches those cached credentials to
+  any site's request for these URLs, CORS or not). What's new here is that
+  a successful cross-origin `fetch()` lets a page's *script* read the JSON
+  body, where an `<img>`/top-level `<a>` load only ever rendered pixels or
+  required a visible, user-driven navigation. That is a real difference in
+  exploitability if an admin's browser has cached credentials and later
+  visits a hostile page — it does not, however, let anyone who lacks those
+  cached credentials (or the password) reach this data, so it is not a new
+  way to *obtain* access, only a wider blast radius for the same
+  already-documented "any page in a browser holding cached admin
+  credentials can hit these routes" exposure. Given this is a prototype for
+  trusted home/personal-scale deployment (not a hardened multi-tenant
+  product, per this doc's scope above), that tradeoff is accepted in
+  exchange for the inline activity list; it's the same reasoning already
+  written below for why these routes being reachable cross-origin isn't a
+  privilege escalation on its own.
 
 ## Relay (see `docs/relay.md` for full detail)
 

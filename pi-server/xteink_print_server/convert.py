@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Iterator
+from typing import Callable, Iterator, Optional
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -86,6 +86,20 @@ def iter_source_pages(document_bytes: bytes, mime: str, dpi: int) -> Iterator[Im
         raise ConversionError(f"unsupported document MIME type: {mime}")
 
 
+def render_thumbnail_jpeg(page_image: Image.Image, max_width: int = 160, quality: int = 70) -> bytes:
+    """Downscales an already-dithered mode "1" panel page — the exact bitmap
+    the X4 itself will show, not an idealized re-render — into a small JPEG
+    for the Pi admin console's thumbnail route (see admin_api.py). JPEG
+    can't encode mode "1" directly, so convert to "L" (grayscale) first;
+    since a 1-bit image only has two gray levels either way, the visual
+    result is unchanged, just re-tagged for an encoder that accepts it."""
+    img = page_image.convert("L")
+    img.thumbnail((max_width, max_width * 2))  # generous height cap; aspect ratio preserved
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
 def convert_document_to_xtc(
     document_bytes: bytes,
     mime: str,
@@ -95,12 +109,22 @@ def convert_document_to_xtc(
     target_width: int,
     target_height: int,
     dpi: int = 150,
+    on_first_page: Optional[Callable[[Image.Image], None]] = None,
 ) -> tuple[bytes, int]:
-    """Returns (xtc_bytes, page_count). Raises ConversionError on failure."""
+    """Returns (xtc_bytes, page_count). Raises ConversionError on failure.
+
+    on_first_page, if given, is called once with the first page's already-
+    prepared (resized+dithered) image — lets a caller (ipp_server.py)
+    derive a thumbnail from the exact bitmap already rendered here, without
+    a second PDF render or holding every page past when encode_xtc needs
+    them."""
     prepared_pages: list[Image.Image] = []
     page_count = 0
     for source_page in iter_source_pages(document_bytes, mime, dpi):
-        prepared_pages.append(prepare_page_image(source_page, target_width, target_height))
+        prepared = prepare_page_image(source_page, target_width, target_height)
+        prepared_pages.append(prepared)
+        if page_count == 0 and on_first_page is not None:
+            on_first_page(prepared)
         page_count += 1
         if page_count > MAX_PAGE_COUNT:
             raise ConversionError(f"document exceeds the maximum supported page count ({MAX_PAGE_COUNT})")

@@ -236,6 +236,103 @@ easy reach, or (hotspot mode) away from any known network entirely.
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
 
+### On-device Web UI full-document preview
+
+The job-list page's "Preview" button (`ui/pages/joblist.html`, see
+`tools/xtc-wasm/README.md`) decodes the X4's own converted XTC bitmap —
+useful everywhere, including hotspot mode, but it's the e-ink rendition,
+not the original document. In **station mode only** (the X4 joined to a
+real network, not its own isolated hotspot), the job-list page also shows
+a "View full document" link per job that opens the Pi's untouched
+original (`pi-server`'s `originals_dir` — see `docs/architecture.md`
+"Data model") directly in the phone's browser.
+
+This is a deliberately different shape from the WASM preview, not an
+extension of it:
+
+- **The X4 never touches these bytes.** The link points the phone straight
+  at the Pi's admin console (`GET /api/admin/v1/jobs/{id}/original`,
+  `admin_api.py`) — a normal top-level navigation/new-tab open, not a
+  fetch the X4 proxies. Nothing is downloaded to, cached on, or streamed
+  through the device; the whole point is that the original never needs to
+  fit in the X4's flash or RAM budget the way an XTC page does.
+- **Auth is the existing admin console password, reused as-is** — no new
+  token-issuance mechanism. The Pi's `GET /api/admin/v1/jobs/{id}/original`
+  route (`admin_api.py`) is gated by the exact same shared HTTP Basic
+  check every other admin-console route already uses; the browser's own
+  native password prompt handles it, so neither the X4 nor this page needs
+  any client-side auth code for it. This only works at all when the Pi
+  owner has set an admin password (`XTEINK_ADMIN_PASSWORD`) — if not, the
+  link is simply never shown (see below), the same "empty disables"
+  pattern the admin console and relay already use.
+- **Wired at pairing time, not discovered at runtime.** `pair_device.py`
+  writes an optional `pi_admin_base_url` field into `/system/device.json`
+  only when the admin console is enabled at pairing time (mirroring how
+  the relay fields are only written when relay is configured) —
+  `config::DeviceConfigData::hasAdminConsole`/`piAdminBaseUrl`. `/api/status`
+  only ever includes `pi_admin_base_url` in its response when
+  `hasAdminConsole` is set *and* the server is currently in station mode —
+  hotspot mode's phone has no network path to the Pi at all, so the field
+  (and the link) is omitted rather than shown-but-broken.
+
+Two more station-mode-only extensions reuse this exact shape — same
+password gate, same non-proxied direct link, same `piAdminBaseUrl`-presence
+gating:
+
+- **Job thumbnails.** `convert.py`'s `render_thumbnail_jpeg()` generates a
+  small JPEG from the job's own already-rendered, already-dithered first
+  XTC page (no second document render) at ingest time
+  (`ipp_server.py`'s `_ingest_document()`); a thumbnail-generation failure
+  is logged and simply leaves the job without one, never blocking
+  ingestion. Stored at `pi-server`'s `thumbnails_dir` and tracked by
+  `jobs.thumbnail_path` (`db.py`'s `SCHEMA`, added via an explicit
+  `_ensure_column()` migration — this project's first schema change to an
+  already-deployed table; see that function's docstring for what it does
+  and doesn't cover). Served by `GET /api/admin/v1/jobs/{id}/thumbnail`
+  and rendered as a plain `<img>` per job card in `joblist.html`, with
+  `onerror` removing the element on any failure (unknown job, no
+  thumbnail generated, network failure) — the same "omit rather than
+  show broken" rule as everywhere else in this feature.
+
+  One open question, not fully resolved: unlike the "View full document"
+  `<a target="_blank">` link (a top-level navigation, which reliably
+  triggers the browser's native HTTP Basic Auth prompt on first use), an
+  `<img>` is a subresource load. Verified in this project's own testing
+  (a real headless Chromium, not just reasoning): a subresource request to
+  an unauthenticated Basic-Auth origin fails cleanly with no prompt and no
+  hang — so there's no risk of a jarring, unexplained password dialog
+  appearing just because a thumbnail tried to load. What's *not* verified
+  on real mobile browsers is whether completing that native prompt once
+  (by opening "View full document") leaves credentials cached broadly
+  enough that a *subsequent* `<img>` load — possibly in a different tab —
+  succeeds silently afterward, the way HTTP Basic Auth caching has
+  classically worked. If it doesn't hold on a given browser, the practical
+  effect is simply "no thumbnail appears" — never a broken image, an
+  incorrect one, or an unexpected prompt.
+- **Recent activity.** `db.py`'s `list_recent_approvals_for_device()`
+  (using the existing `idx_approvals_device` index) backs
+  `GET /api/admin/v1/devices/{id}/approvals` — scoped to one device's own
+  approval history (not the whole household's), reusing `device_id` from
+  `/api/status`. Unlike "View full document" and the thumbnails, this route
+  is now CORS-enabled (`admin_api.py`'s `_send_cors_headers()` plus a
+  `do_OPTIONS` preflight handler, both scoped to this one route only), so
+  `joblist.html` renders the approval history inline via its own
+  `fetch(url, { credentials: "include" })` instead of only linking out. The
+  CORS response reflects the request's actual `Origin` header value — never
+  `Access-Control-Allow-Origin: *`, which the CORS spec disallows for
+  credentialed requests and which would be wrong here anyway since
+  responses carry job titles/approval detail — and pairs it with
+  `Access-Control-Allow-Credentials: true` so the browser attaches its
+  cached Basic-auth credentials cross-origin. Because `Authorization` isn't
+  a CORS-safelisted header, the browser sends a preflight `OPTIONS` first;
+  that preflight is answered without calling `_authenticate()` (preflight
+  requests never carry credentials, by design — nothing to authenticate
+  yet) and returns `Allow-Methods: GET`/`Allow-Headers: Authorization`. The
+  `<a target="_blank">` link is kept alongside the inline list as a
+  fallback/"view all", and the inline fetch fails soft (leaves the list
+  empty) on any network error, non-2xx status, or CORS failure — same
+  "worst case is nothing shown" rule as the thumbnails.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,

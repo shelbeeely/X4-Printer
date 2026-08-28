@@ -120,7 +120,16 @@ HTTP, and shuts itself off on the same idle timer as everything else).
 3. From there: view the queue, and tap Print/Keep/Delete on any job — it
    queues the same durable approval the physical action menu would,
    synced to the Pi on the device's next wake (or immediately if you also
-   hit Sync Now on the device itself).
+   hit Sync Now on the device itself). **Preview** decodes the job's
+   on-device XTC page right there in the browser (works in either mode,
+   including Hotspot with no network beyond the phone). In **Wi-Fi mode
+   only**, if your `device.json` includes a `pi_admin_base_url` field
+   (written automatically by `pair_device.py` when the Pi's admin console
+   has a password set — see `docs/architecture.md` "On-device Web UI
+   full-document preview"), a **View full document** link also appears,
+   opening the original file straight from the Pi in a new tab (the Pi
+   admin password logs you in there, once, via your browser's own
+   prompt).
 4. **Stop** (footer button on the Web UI screen) ends the session
    immediately; otherwise it ends on its own after ~90 seconds of no
    activity from the phone, same idle timer as the rest of the UI.

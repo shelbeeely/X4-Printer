@@ -29,6 +29,14 @@ class WifiManager {
   String currentSsid() const;
   String currentIp() const;  // station-mode IP, e.g. for the web UI's status screen
 
+  // Live RSSI (dBm, negative — closer to 0 is stronger) of the currently
+  // associated AP. Only meaningful when isConnected(); this class holds no
+  // persistent state (a fresh WifiManager is constructed per call site, see
+  // ui/WebUiServer.cpp), so like isConnected()/currentSsid()/currentIp()
+  // above, this reads the radio's live state directly rather than
+  // remembering a value from connect()'s own internal network scan.
+  int32_t rssi() const;
+
   // Broadcasts this device's own hotspot (WiFi.softAP) — for the on-device
   // web UI's "mobile, no known network in range" mode (ui/WebUiServer.h).
   // Unlike connect(), this deliberately does NOT consult WifiStore: it's

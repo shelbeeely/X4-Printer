@@ -56,6 +56,11 @@ bool DeviceConfig::load() {
     copyField(data_.relayAccountToken, sizeof(data_.relayAccountToken), root["relay_account_token"]);
   }
 
+  if (root["pi_admin_base_url"].is<const char*>()) {
+    data_.hasAdminConsole = true;
+    copyField(data_.piAdminBaseUrl, sizeof(data_.piAdminBaseUrl), root["pi_admin_base_url"]);
+  }
+
   data_.loaded = true;
   return true;
 }

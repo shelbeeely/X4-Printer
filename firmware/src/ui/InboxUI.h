@@ -78,6 +78,11 @@ struct InboxUiState {
   size_t framebufferSize = 0;
   uint16_t panelWidth = 0;
   uint16_t panelHeight = 0;
+  // Set by main.cpp's setup() as its very first statement, before anything
+  // else runs — millis() at the top of this wake. The web UI's diagnostics
+  // route reports uptime-since-wake as millis() - wakeMillis; this resets
+  // to 0 every deep-sleep cycle (not a device-lifetime uptime).
+  uint32_t wakeMillis = 0;
 
   // Signals to main.cpp's loop, set by action handlers, cleared after
   // being acted on. Keeps SyncManager/SleepManager out of the UI layer.

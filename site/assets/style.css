@@ -1,8 +1,10 @@
 /* X4 Print Inbox — site stylesheet
  *
- * Plain CSS, no framework, no build step, system font stack only.
- * Theming is handled entirely via `prefers-color-scheme` — there is no
- * JS theme toggle on this static site, which is intentional.
+ * Plain CSS, no framework, no build step. Theming is handled entirely via
+ * `prefers-color-scheme` — there is no JS theme toggle on this static
+ * site, which is intentional. Retro-70s orange design system (see
+ * docs/design-system.md) — same tokens/type/motion as the Pi admin
+ * console and the X4 on-device web UI.
  *
  * Shared classes used across all pages (index.html, how-it-works.html,
  * setup.html, flash.html) — keep names/semantics stable, other pages
@@ -16,23 +18,33 @@
  *   .site-footer   bottom bar wrapping a .wrap, muted text
  */
 
+@import url(https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap);
+
 :root {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #5a6270;
-  --accent: #2563eb;
-  --card-bg: #f6f7f9;
-  --border: #e0e2e7;
+  --bg: #f7ecd1;
+  --card-bg: #fdf6e3;
+  --border: #e0c99a;
+  --fg: #3a2115;
+  --muted: #8a6f4e;
+  --accent: #e17a25;
+  --accent-fg: #2a1608;
+  --gold: #e19d25;
+  --accent2: #bd361e;
+  --sage: #6b7048;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161a;
-    --fg: #eef0f3;
-    --muted: #9aa2b1;
-    --accent: #6ea8fe;
-    --card-bg: #1c1f26;
-    --border: #2c3038;
+    --bg: #1c1109;
+    --card-bg: #3a2314;
+    --border: #5c3a1f;
+    --fg: #f3e3c4;
+    --muted: #b89878;
+    --accent: #e17a25;
+    --accent-fg: #2a1608;
+    --gold: #e19d25;
+    --accent2: #bd361e;
+    --sage: #8f9463;
   }
 }
 
@@ -44,11 +56,26 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes waveScroll {
+  from { background-position-x: 0; }
+  to { background-position-x: 40px; }
+}
+
+@keyframes ctaGlow {
+  0%, 100% { box-shadow: 0 0 0 rgba(225, 122, 37, 0); }
+  50% { box-shadow: 0 0 16px rgba(225, 122, 37, 0.55); }
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  font-family: "Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   font-size: 16px;
   line-height: 1.6;
@@ -66,8 +93,21 @@ body {
 /* Header / nav -------------------------------------------------------- */
 
 .site-header {
-  border-bottom: 1px solid var(--border);
-  padding: 1rem 0;
+  padding: 1rem 0 2rem;
+  position: relative;
+}
+
+.site-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='0.55'/%3E%3C/svg%3E");
+  background-repeat: repeat-x;
+  background-size: 40px 100%;
+  animation: waveScroll 4s linear infinite;
 }
 
 .site-header .wrap {
@@ -79,8 +119,10 @@ body {
 }
 
 .brand {
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-family: "Boogaloo", "Nunito Sans", sans-serif;
+  font-weight: 400;
+  font-size: 1.4rem;
+  letter-spacing: 0.01em;
   color: var(--fg);
   text-decoration: none;
 }
@@ -99,6 +141,7 @@ body {
   color: var(--muted);
   text-decoration: none;
   font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .site-nav a:hover {
@@ -107,13 +150,13 @@ body {
 
 .site-nav a[aria-current="page"] {
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* Main content --------------------------------------------------------- */
 
 main.wrap {
-  padding-top: 2rem;
+  padding-top: 2.5rem;
   padding-bottom: 3rem;
 }
 
@@ -121,21 +164,24 @@ h1,
 h2,
 h3,
 h4 {
+  font-family: "Boogaloo", "Nunito Sans", sans-serif;
+  font-weight: 400;
   line-height: 1.25;
   margin-top: 2rem;
   margin-bottom: 0.75rem;
+  letter-spacing: 0.01em;
 }
 
 h1 {
-  font-size: 2.2rem;
+  font-size: 2.6rem;
 }
 
 h2 {
-  font-size: 1.6rem;
+  font-size: 1.9rem;
 }
 
 h3 {
-  font-size: 1.25rem;
+  font-size: 1.4rem;
 }
 
 p {
@@ -148,6 +194,7 @@ a {
 
 .muted {
   color: var(--muted);
+  font-family: "Nunito Sans", sans-serif;
 }
 
 code,
@@ -159,7 +206,7 @@ pre {
 code {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0.1em 0.4em;
   font-size: 0.9em;
 }
@@ -167,7 +214,7 @@ code {
 pre {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 1rem;
   overflow-x: auto;
   font-size: 0.9em;
@@ -184,11 +231,12 @@ pre code {
 
 .hero {
   padding: 2rem 0 2.5rem;
+  animation: fadeInUp 0.45s ease-out both;
 }
 
 .hero h1 {
   margin-top: 0;
-  font-size: 2.6rem;
+  font-size: 3rem;
 }
 
 .hero p {
@@ -209,9 +257,10 @@ pre code {
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 1.25rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px rgba(58, 33, 21, 0.08);
+  animation: fadeInUp 0.4s ease-out both;
 }
 
 .card h3 {
@@ -229,6 +278,10 @@ pre code {
   margin: 1.5rem 0;
 }
 
+.card-grid .card:nth-child(2) { animation-delay: 0.06s; }
+.card-grid .card:nth-child(3) { animation-delay: 0.12s; }
+.card-grid .card:nth-child(4) { animation-delay: 0.18s; }
+
 @media (max-width: 640px) {
   .card-grid {
     grid-template-columns: 1fr;
@@ -239,28 +292,34 @@ pre code {
 
 .btn {
   display: inline-block;
-  padding: 0.65rem 1.25rem;
-  border-radius: 8px;
+  padding: 0.65rem 1.4rem;
+  border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--fg);
   text-decoration: none;
   font-weight: 600;
   font-size: 0.95rem;
   background: var(--card-bg);
+  transition: border-color 0.15s ease, transform 0.1s ease;
 }
 
 .btn:hover {
   border-color: var(--accent);
 }
 
+.btn:active {
+  transform: scale(0.97);
+}
+
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #ffffff;
+  color: var(--accent-fg);
+  animation: ctaGlow 2.5s ease-in-out infinite;
 }
 
 .btn-primary:hover {
-  opacity: 0.9;
+  opacity: 0.92;
 }
 
 /* Footer ------------------------------------------------------------- */
@@ -294,7 +353,7 @@ pre code {
 .steps li {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 0.85rem 1.1rem;
   display: flex;
   align-items: baseline;
@@ -302,7 +361,7 @@ pre code {
 }
 
 .steps li .step-num {
-  color: var(--accent);
+  color: var(--gold);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   min-width: 1.5em;
@@ -316,6 +375,6 @@ pre code {
   }
 
   .hero h1 {
-    font-size: 2rem;
+    font-size: 2.2rem;
   }
 }

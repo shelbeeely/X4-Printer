@@ -1,0 +1,35 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X4 Print Inbox</title>
+<script>(function(){try{var t=localStorage.getItem('x4-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
+  --accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
+    --accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810;
+  }
+}
+html[data-theme="dark"]{--bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;--accent:#e17a25;--accent-fg:#2a1608;--danger:#ff6a47;--danger-bg:#3a1810}
+html[data-theme="light"]{--bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;--accent:#e17a25;--accent-fg:#2a1608;--danger:#bd361e;--danger-bg:#f6ded6}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
+@keyframes ctaGlow{0%,100%{box-shadow:0 0 0 rgba(225,122,37,0)}50%{box-shadow:0 0 14px rgba(225,122,37,.55)}}
+body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg);animation:fadeInUp .4s ease-out both}
+header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
+header h1{margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
+input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:16px}
+button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:999px;font-weight:600;animation:ctaGlow 2.5s ease-in-out infinite}
+</style></head>
+<body><header><h1>X4 Print Inbox</h1></header><p>Enter the PIN shown on the device screen.</p>
+<form method="POST" action="/login">
+<input name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus>
+<button type="submit">Unlock</button></form></body></html>

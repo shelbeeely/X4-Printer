@@ -52,6 +52,15 @@ def main() -> int:
         pairing["relay_base_url"] = f"{config.relay_url.rstrip('/')}/relay/v1"
         pairing["relay_account_id"] = config.relay_account_id
         pairing["relay_account_token"] = config.relay_account_token
+    if config.admin_password:
+        # Lets the X4's on-device web UI (station mode only) link a phone
+        # straight to the Pi's original-document route — see
+        # docs/architecture.md "On-device Web UI full-document preview".
+        # Omitted entirely when the admin console itself is disabled
+        # (empty admin_password), same conditional-inclusion pattern as
+        # the relay fields above.
+        admin_scheme = "https" if config.tls_cert.exists() and config.tls_key.exists() else "http"
+        pairing["pi_admin_base_url"] = f"{admin_scheme}://{args.pi_host}:{config.admin_port}"
 
     args.out.write_text(json.dumps(pairing, indent=2) + "\n")
     print(f"Paired device_id={device_id}")

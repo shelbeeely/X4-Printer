@@ -20,6 +20,15 @@
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 
+// Also serves tools/xtc-wasm/'s compiled WASM decoder (embedded via
+// ui/XtcDecoderWasmData.h) and a raw-bytes route for a job's XTC file, so
+// the job list page can decode and preview a page entirely client-side —
+// see ui/pages/joblist.html's script for the fetch/decode glue. Both
+// on-device pages (ui/pages/login.html, ui/pages/joblist.html) and the
+// WASM decoder's .wasm/.js are embedded gzip-compressed (ui/PagesData.h,
+// ui/XtcDecoderWasmData.h) and served via sendGzip() below — see
+// ui/pages/generate_pages_header.py for why.
+
 namespace ui {
 
 enum class WebUiMode { Off, Station, Hotspot };
@@ -35,7 +44,13 @@ class WebUiServer {
   // after construction rather than reference members) — call once from
   // ui::initApp(), after InboxUiState's own pointers are set in
   // main.cpp's setup().
-  void attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox, const config::DeviceConfigData* deviceConfig);
+  // panelWidth/panelHeight/wakeMillis feed the diagnostics route
+  // (handleApiDiag()) only — the device already computes these for its own
+  // framebuffer sizing and idle timer (main.cpp's setup()), so this is
+  // exposing existing values, not tracking new state on this class's
+  // behalf.
+  void attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox, const config::DeviceConfigData* deviceConfig,
+              uint16_t panelWidth, uint16_t panelHeight, uint32_t wakeMillis);
 
   // Joins a known Wi-Fi network (net::WifiManager::connect(), same saved
   // credentials the normal sync pass uses) and starts the server on the
@@ -77,6 +92,9 @@ class WebUiServer {
   store::JobIndex* jobs_ = nullptr;
   store::ApprovalOutboxIndex* outbox_ = nullptr;
   const config::DeviceConfigData* deviceConfig_ = nullptr;
+  uint16_t panelWidth_ = 0;
+  uint16_t panelHeight_ = 0;
+  uint32_t wakeMillis_ = 0;
 
   WebServer server_{80};
   WebUiMode mode_ = WebUiMode::Off;
@@ -105,9 +123,20 @@ class WebUiServer {
   void handleRoot();
   void handleLogin();
   void handleApiStatus();
+  void handleApiDiag();
   void handleApiJobsGet();
   void handleApiJobsPost();
+  void handleApiJobXtc();
+  void handleXtcDecoderWasm();
+  void handleXtcDecoderJs();
   void handleNotFound();
+
+  // Shared by every route serving one of the gzip-embedded static assets
+  // (firmware/src/ui/PagesData.h, XtcDecoderWasmData.h) — every browser
+  // capable of running this UI's client-side WASM decode also
+  // unconditionally supports gzip response decoding, so this is used
+  // without checking the request's Accept-Encoding header.
+  void sendGzip(int code, const char* contentType, const unsigned char* data, size_t len);
 };
 
 }  // namespace ui

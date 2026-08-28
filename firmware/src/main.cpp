@@ -88,6 +88,14 @@ freeink::ui::InputSnapshot readInputSnapshot() {
 }  // namespace
 
 void setup() {
+  // Captured first, before anything else runs: the web UI's diagnostics
+  // route reports "uptime since this wake" as millis() - wakeMillis, which
+  // only means anything if it's measured from as close to the actual wake
+  // as this code can get. Deep sleep has no way to persist a monotonic
+  // clock across sleep cycles without RTC-memory plumbing this doesn't
+  // need — this is uptime since wake, not device lifetime uptime.
+  uiState.wakeMillis = millis();
+
 #ifdef ENABLE_SERIAL_LOG
   Serial.begin(115200);
 #endif

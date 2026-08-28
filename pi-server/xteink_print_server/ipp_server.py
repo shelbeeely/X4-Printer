@@ -31,7 +31,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from .config import Config
-from .convert import ConversionError, SUPPORTED_MIME_TYPES, convert_document_to_xtc
+from .convert import ConversionError, SUPPORTED_MIME_TYPES, convert_document_to_xtc, render_thumbnail_jpeg
 from .db import Database
 from .util import sha256_file
 
@@ -379,6 +379,20 @@ class IppRequestHandler(BaseHTTPRequestHandler):
 
         title = meta.get("document-name") or meta.get("job-name") or "Untitled document"
 
+        # Populated by on_first_page below, from the exact already-rendered
+        # first page — no second PDF render. A thumbnail-generation failure
+        # must never block job ingestion (the XTC conversion that actually
+        # matters already succeeded by the time this could fail), so
+        # failures here are logged and simply leave the holder empty rather
+        # than propagating.
+        thumbnail_bytes_holder: list[bytes] = []
+
+        def _try_render_thumbnail(img):
+            try:
+                thumbnail_bytes_holder.append(render_thumbnail_jpeg(img))
+            except Exception as exc:  # noqa: BLE001 - must never block job ingestion
+                logger.warning("thumbnail generation failed for job %r: %s", title, exc)
+
         try:
             xtc_bytes, page_count = convert_document_to_xtc(
                 document,
@@ -387,6 +401,7 @@ class IppRequestHandler(BaseHTTPRequestHandler):
                 target_width=self.config.panel_width,
                 target_height=self.config.panel_height,
                 dpi=self.config.render_dpi,
+                on_first_page=_try_render_thumbnail,
             )
         except ConversionError as exc:
             logger.error("conversion failed for job %r: %s", title, exc)
@@ -399,6 +414,10 @@ class IppRequestHandler(BaseHTTPRequestHandler):
         xtc_path = self.config.xtc_dir / f"{job_id}.xtc"
         xtc_path.write_bytes(xtc_bytes)
 
+        thumbnail_path = self.config.thumbnails_dir / f"{job_id}.jpg"
+        if thumbnail_bytes_holder:
+            thumbnail_path.write_bytes(thumbnail_bytes_holder[0])
+
         stored_id = self.db.insert_job(
             title=title,
             source="ipp",
@@ -409,6 +428,7 @@ class IppRequestHandler(BaseHTTPRequestHandler):
             xtc_bytes=len(xtc_bytes),
             xtc_sha256=sha256_file(xtc_path),
             page_count=page_count,
+            thumbnail_path=str(thumbnail_path) if thumbnail_bytes_holder else "",
         )
         logger.info("ingested job %s %r (%d pages, %d bytes original)", stored_id, title, page_count, len(document))
         return stored_id

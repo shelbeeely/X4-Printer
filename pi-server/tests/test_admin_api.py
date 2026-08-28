@@ -18,11 +18,16 @@ DEVICE_TOKEN = "supersecrettoken"
 ADMIN_PASSWORD = "let-me-in"
 
 
-def _insert_job(db: Database, config: Config, title="Doc") -> str:
+def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False) -> str:
     xtc_path = config.xtc_dir / "job1.xtc"
     xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
     original_path = config.originals_dir / "job1.pdf"
     original_path.write_bytes(b"%PDF-fake-bytes")
+    thumbnail_path = ""
+    if with_thumbnail:
+        thumb = config.thumbnails_dir / "job1.jpg"
+        thumb.write_bytes(b"\xff\xd8\xff-fake-jpeg-bytes")
+        thumbnail_path = str(thumb)
     return db.insert_job(
         title=title,
         source="ipp",
@@ -33,6 +38,7 @@ def _insert_job(db: Database, config: Config, title="Doc") -> str:
         xtc_bytes=xtc_path.stat().st_size,
         xtc_sha256=sha256_file(xtc_path),
         page_count=1,
+        thumbnail_path=thumbnail_path,
     )
 
 
@@ -115,6 +121,66 @@ def test_list_jobs(running_admin_api):
     assert job["last_action"] is None
 
 
+def test_get_original_streams_untouched_file(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+
+    resp = _get(f"{base}/jobs/{job_id}/original")
+    assert resp.headers["Content-Type"] == "application/pdf"
+    assert resp.read() == b"%PDF-fake-bytes"
+
+
+def test_get_original_requires_auth(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/{job_id}/original", password=None)
+    assert exc.value.code == 401
+
+
+def test_get_original_unknown_job_404s(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/does-not-exist/original")
+    assert exc.value.code == 404
+
+
+def test_get_original_missing_file_404s(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    row = db.get_job(job_id)
+    from pathlib import Path
+
+    Path(row["original_path"]).unlink()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/{job_id}/original")
+    assert exc.value.code == 404
+
+
+def test_get_thumbnail_streams_jpeg(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config, with_thumbnail=True)
+
+    resp = _get(f"{base}/jobs/{job_id}/thumbnail")
+    assert resp.headers["Content-Type"] == "image/jpeg"
+    assert resp.read() == b"\xff\xd8\xff-fake-jpeg-bytes"
+
+
+def test_get_thumbnail_no_thumbnail_404s(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config, with_thumbnail=False)
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/{job_id}/thumbnail")
+    assert exc.value.code == 404
+
+
+def test_get_thumbnail_unknown_job_404s(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/jobs/does-not-exist/thumbnail")
+    assert exc.value.code == 404
+
+
 def test_job_action_print_reuses_apply_approval(running_admin_api, fake_lp_binary):
     base, db, config = running_admin_api
     job_id = _insert_job(db, config)
@@ -145,6 +211,13 @@ def test_job_action_requeue_clears_deliveries(running_admin_api):
 
 
 def test_job_action_purge_removes_files_and_row(running_admin_api):
+    # No thumbnail on this job (default) — thumbnail_path is '' (the
+    # migration default), which regression-tests the purge guard: an
+    # earlier version unconditionally called Path(job[field]).unlink() for
+    # every field, and Path("") resolves to the current working directory,
+    # which unlink() refuses with IsADirectoryError regardless of
+    # missing_ok. This test failing with that error is exactly what the
+    # guard in admin_api.py's purge branch prevents.
     base, db, config = running_admin_api
     job_id = _insert_job(db, config)
     row = db.get_job(job_id)
@@ -159,6 +232,19 @@ def test_job_action_purge_removes_files_and_row(running_admin_api):
     assert db.get_job(job_id) is None
     assert not Path(row["original_path"]).exists()
     assert not Path(row["xtc_path"]).exists()
+
+
+def test_job_action_purge_removes_thumbnail_when_present(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config, with_thumbnail=True)
+    row = db.get_job(job_id)
+    from pathlib import Path
+
+    assert Path(row["thumbnail_path"]).exists()
+
+    resp = json.loads(_post(f"{base}/jobs/{job_id}/action", {"action": "purge"}).read())
+    assert resp["status"] == "purged"
+    assert not Path(row["thumbnail_path"]).exists()
 
 
 def test_job_action_unknown_action_rejected(running_admin_api):
@@ -194,6 +280,89 @@ def test_device_action_on_unknown_device_404s(running_admin_api):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(f"{base}/devices/does-not-exist/revoke", {})
     assert exc.value.code == 404
+
+
+def test_device_approvals_scoped_to_one_device(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    db.record_approval_if_new(
+        approval_id="a1", device_id=DEVICE_ID, job_id=job_id, action="print", created_at=1, received_via="direct"
+    )
+    db.record_approval_if_new(
+        approval_id="a2", device_id="dev-other", job_id=job_id, action="keep", created_at=2, received_via="direct"
+    )
+
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/approvals").read())
+    assert len(resp["approvals"]) == 1
+    assert resp["approvals"][0]["approval_id"] == "a1"
+
+
+def test_device_approvals_cors_headers_reflect_origin(running_admin_api):
+    # The X4 page's fetch(url, {credentials: "include"}) needs the actual
+    # Origin reflected back (never "*", which browsers reject for
+    # credentialed requests) plus Allow-Credentials, on the real GET.
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    db.record_approval_if_new(
+        approval_id="a1", device_id=DEVICE_ID, job_id=job_id, action="print", created_at=1, received_via="direct"
+    )
+    origin = "http://x4-device.local:80"
+
+    resp = _get(f"{base}/devices/{DEVICE_ID}/approvals", headers={"Origin": origin})
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+    assert json.loads(resp.read())["approvals"][0]["approval_id"] == "a1"
+
+
+def test_device_approvals_other_routes_have_no_cors_headers(running_admin_api):
+    # CORS is scoped to devices/{id}/approvals only — original/thumbnail
+    # are loaded via <a>/<img>, which never trigger CORS enforcement, so no
+    # headers are needed or wanted there.
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config)
+    resp = _get(f"{base}/jobs/{job_id}/original", headers={"Origin": "http://x4-device.local"})
+    assert "Access-Control-Allow-Origin" not in resp.headers
+
+
+def test_device_approvals_preflight_options(running_admin_api):
+    base, _db, _config = running_admin_api
+    origin = "http://x4-device.local:80"
+    req = urllib.request.Request(
+        f"{base}/devices/{DEVICE_ID}/approvals", method="OPTIONS", headers={"Origin": origin}
+    )
+    resp = urllib.request.urlopen(req, timeout=5)
+    assert resp.status == 204
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+    assert resp.headers["Access-Control-Allow-Methods"] == "GET"
+    assert resp.headers["Access-Control-Allow-Headers"] == "Authorization"
+
+
+def test_preflight_options_does_not_require_auth(running_admin_api):
+    # Preflight requests never carry credentials — that's expected, not a
+    # bug — so do_OPTIONS must not gate on _authenticate().
+    base, _db, _config = running_admin_api
+    req = urllib.request.Request(
+        f"{base}/devices/{DEVICE_ID}/approvals", method="OPTIONS", headers={"Origin": "http://x4-device.local"}
+    )
+    resp = urllib.request.urlopen(req, timeout=5)  # no Authorization header at all
+    assert resp.status == 204
+
+
+def test_preflight_options_unmatched_path_404s(running_admin_api):
+    base, _db, _config = running_admin_api
+    req = urllib.request.Request(f"{base}/jobs", method="OPTIONS", headers={"Origin": "http://x4-device.local"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 404
+
+
+def test_device_approvals_unknown_device_returns_empty_not_404(running_admin_api):
+    # Unlike revoke/rotate-token, this route doesn't check "device exists"
+    # first — a revoked device's history is still valid history to show.
+    base, _db, _config = running_admin_api
+    resp = json.loads(_get(f"{base}/devices/never-paired/approvals").read())
+    assert resp["approvals"] == []
 
 
 def test_approvals_list_reflects_admin_action(running_admin_api, fake_lp_binary):

@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     xtc_bytes INTEGER NOT NULL,
     xtc_sha256 TEXT NOT NULL,
     page_count INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
+    status TEXT NOT NULL DEFAULT 'pending',
+    thumbnail_path TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS job_deliveries (
@@ -74,6 +75,19 @@ CREATE INDEX IF NOT EXISTS idx_approvals_device ON approvals(device_id);
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """Adds `column` to `table` if it isn't already there. This project's
+    SCHEMA is CREATE TABLE IF NOT EXISTS, executed once — a no-op against an
+    already-existing jobs.db from a prior install, so a genuinely new
+    column (like jobs.thumbnail_path below) needs an explicit, idempotent
+    migration rather than just editing SCHEMA and hoping. This only covers
+    additive, nullable columns; changing a column's type or dropping one
+    would need a real migration story this project doesn't have yet."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 class Database:
     def __init__(self, path: Path):
         self.path = path
@@ -81,6 +95,7 @@ class Database:
         self._write_lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            _ensure_column(conn, "jobs", "thumbnail_path", "TEXT NOT NULL DEFAULT ''")
 
     def _connect(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn"):
@@ -131,14 +146,15 @@ class Database:
         xtc_bytes: int,
         xtc_sha256: str,
         page_count: int,
+        thumbnail_path: str = "",
     ) -> str:
         job_id = uuid.uuid4().hex
         with self.transaction() as conn:
             conn.execute(
                 """INSERT INTO jobs
                    (job_id, title, created_at, source, original_path, original_mime,
-                    original_bytes, xtc_path, xtc_bytes, xtc_sha256, page_count, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                    original_bytes, xtc_path, xtc_bytes, xtc_sha256, page_count, status, thumbnail_path)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
                 (
                     job_id,
                     title,
@@ -151,6 +167,7 @@ class Database:
                     xtc_bytes,
                     xtc_sha256,
                     page_count,
+                    thumbnail_path,
                 ),
             )
         return job_id
@@ -301,6 +318,22 @@ class Database:
                ORDER BY a.received_at DESC
                LIMIT ?""",
             (limit,),
+        )
+
+    def list_recent_approvals_for_device(self, device_id: str, limit: int = 10) -> list[sqlite3.Row]:
+        """Same shape as list_recent_approvals, scoped to one device — backs
+        the on-device web UI's "recent activity" view (station mode only,
+        see admin_api.py's device-approvals route), so a device only ever
+        sees its own history, not the whole household's. Uses the existing
+        idx_approvals_device index."""
+        return self.query(
+            """SELECT a.*, j.title AS job_title
+               FROM approvals a
+               LEFT JOIN jobs j ON j.job_id = a.job_id
+               WHERE a.device_id = ?
+               ORDER BY a.received_at DESC
+               LIMIT ?""",
+            (device_id, limit),
         )
 
     # -- Devices (admin) ------------------------------------------------------

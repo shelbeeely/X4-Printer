@@ -45,6 +45,8 @@ def config(tmp_path: Path, fake_lp_binary: Path) -> Config:
         lp_binary=str(fake_lp_binary),
         panel_width=800,
         panel_height=480,
+        tls_cert=tmp_path / "data" / "tls" / "server.crt",
+        tls_key=tmp_path / "data" / "tls" / "server.key",
     )
     cfg.ensure_dirs()
     return cfg

@@ -35,6 +35,15 @@ struct DeviceConfigData {
   char relayBaseUrl[kMaxUrlLen] = {0};
   char relayAccountId[kMaxIdLen] = {0};
   char relayAccountToken[kMaxTokenLen] = {0};
+
+  // Set only when pair_device.py paired this device against a Pi with the
+  // admin console enabled (see docs/architecture.md "On-device Web UI
+  // full-document preview") — lets the on-device web UI, in station mode
+  // only, link a phone straight to the Pi's original-document route.
+  // Absent (hasAdminConsole == false) is a normal, expected state, not an
+  // error — most deployments won't have the admin console's password set.
+  bool hasAdminConsole = false;
+  char piAdminBaseUrl[kMaxUrlLen] = {0};
 };
 
 class DeviceConfig {

@@ -2,6 +2,8 @@
 
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <SDCardManager.h>
+#include <SdFat.h>
 #include <WiFi.h>
 
 #include <cstdio>
@@ -9,6 +11,8 @@
 #include <ctime>
 
 #include "net/WifiManager.h"
+#include "ui/PagesData.h"
+#include "ui/XtcDecoderWasmData.h"
 #include "util/Random.h"
 
 namespace ui {
@@ -19,6 +23,10 @@ namespace {
 // screen-readable charset) from fwrand::randomHex() (util/Random.h,
 // shared with ui/InboxUI.cpp's approval-id generation), so they stay
 // local here rather than being folded into that shared helper.
+
+// Matches xtc::XtcReader.cpp's own kBulkChunkBytes — bounded RAM regardless
+// of job size, no full-file buffer.
+constexpr size_t kXtcStreamChunkBytes = 2048;
 
 void randomPin(char* out) {  // out must be 7 bytes
   uint32_t v = esp_random() % 1000000u;
@@ -32,114 +40,35 @@ void randomPassword(char* out, size_t n) {  // out must be n+1 bytes; WPA2 needs
   out[n] = '\0';
 }
 
-constexpr const char* kLoginPageHtml =
-    R"HTML(<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>X4 Print Inbox</title>
-<style>
-:root{
-  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
-  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
-  color-scheme:light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root{
-    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
-    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
+// Human-readable job status for the web UI's job cards. Safe to change from
+// the raw enum ordinal the API used to send: the server and its only
+// consumer (ui/pages/joblist.html) always ship from the same firmware
+// image, so there's no external client depending on the old int shape.
+const char* jobStatusLabel(store::JobStatus s) {
+  switch (s) {
+    case store::JobStatus::Downloaded:
+      return "New";
+    case store::JobStatus::ApprovedPrint:
+      return "Printing";
+    case store::JobStatus::ApprovedKeep:
+      return "Kept";
+    case store::JobStatus::ApprovedDelete:
+      return "Deleted";
   }
+  return "Unknown";
 }
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:320px;margin:3rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
-header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:1rem}
-header h1{margin:0;font-size:1.3rem;font-weight:700}
-input{font-size:1.5rem;width:100%;padding:.5rem;text-align:center;letter-spacing:.3em;box-sizing:border-box;background:var(--card-bg);color:var(--fg);border:1px solid var(--border);border-radius:8px}
-button{width:100%;padding:.75rem;font-size:1.1rem;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg);border-radius:8px;font-weight:600}
-</style></head>
-<body><header><h1>X4 Print Inbox</h1></header><p>Enter the PIN shown on the device screen.</p>
-<form method="POST" action="/login">
-<input name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus>
-<button type="submit">Unlock</button></form></body></html>)HTML";
-
-constexpr const char* kJobListPageHtml =
-    R"HTML(<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>X4 Print Inbox</title>
-<style>
-:root{
-  --bg:#ffffff;--fg:#1a1a1a;--muted:#5a6270;--accent:#2563eb;--accent-fg:#ffffff;
-  --card-bg:#f6f7f9;--border:#e0e2e7;--danger:#b3261e;--danger-bg:#fdecea;
-  color-scheme:light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root{
-    --bg:#14161a;--fg:#eef0f3;--muted:#9aa2b1;--accent:#6ea8fe;--accent-fg:#ffffff;
-    --card-bg:#1c1f26;--border:#2c3038;--danger:#ff8478;--danger-bg:#3a1a18;
-  }
-}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
-header{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.75rem}
-header h1{margin:0;font-size:1.3rem;font-weight:700}
-.job{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-.job h3{margin:0 0 .25rem;font-size:1rem}
-.job button{margin-right:.4rem;padding:.4rem .7rem;border-radius:8px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg)}
-.job button:first-of-type{background:var(--accent);border:1px solid var(--accent);color:var(--accent-fg)}
-#status{color:var(--muted);font-size:.85rem}
-</style></head><body>
-<header><h1>Print Inbox</h1></header>
-<p id="status">Loading...</p>
-<div id="jobs"></div>
-<script>
-async function refreshStatus() {
-  const r = await fetch('/api/status');
-  if (!r.ok) return;
-  const s = await r.json();
-  document.getElementById('status').textContent =
-    s.device_name + ' - ' + s.unread_count + ' unread of ' + s.job_count;
-}
-async function refreshJobs() {
-  const r = await fetch('/api/jobs');
-  if (!r.ok) return;
-  const data = await r.json();
-  const el = document.getElementById('jobs');
-  el.innerHTML = '';
-  if (data.jobs.length === 0) { el.innerHTML = '<p>Inbox empty.</p>'; return; }
-  for (const j of data.jobs) {
-    const div = document.createElement('div');
-    div.className = 'job';
-    const h = document.createElement('h3');
-    h.textContent = j.title + ' (' + j.page_count + ' pg)';
-    div.appendChild(h);
-    if (j.pending_approval) {
-      const p = document.createElement('p');
-      p.textContent = 'Action queued, syncing...';
-      div.appendChild(p);
-    } else {
-      for (const pair of [['Print','print'], ['Keep','keep'], ['Delete','delete']]) {
-        const b = document.createElement('button');
-        b.textContent = pair[0];
-        b.onclick = () => act(j.job_id, pair[1]);
-        div.appendChild(b);
-      }
-    }
-    el.appendChild(div);
-  }
-}
-async function act(jobId, action) {
-  await fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({job_id: jobId, action: action})});
-  refreshJobs();
-}
-refreshStatus();
-refreshJobs();
-setInterval(() => { refreshStatus(); refreshJobs(); }, 20000);
-</script></body></html>)HTML";
 
 }  // namespace
 
 void WebUiServer::attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox,
-                          const config::DeviceConfigData* deviceConfig) {
+                          const config::DeviceConfigData* deviceConfig, uint16_t panelWidth, uint16_t panelHeight,
+                          uint32_t wakeMillis) {
   jobs_ = jobs;
   outbox_ = outbox;
   deviceConfig_ = deviceConfig;
+  panelWidth_ = panelWidth;
+  panelHeight_ = panelHeight;
+  wakeMillis_ = wakeMillis;
 }
 
 void WebUiServer::generateSessionSecrets() {
@@ -200,6 +129,10 @@ void WebUiServer::beginCommon() {
       markActivity();
       handleApiStatus();
     });
+    server_.on("/api/diag", HTTP_GET, [this]() {
+      markActivity();
+      handleApiDiag();
+    });
     server_.on("/api/jobs", HTTP_GET, [this]() {
       markActivity();
       handleApiJobsGet();
@@ -207,6 +140,18 @@ void WebUiServer::beginCommon() {
     server_.on("/api/jobs", HTTP_POST, [this]() {
       markActivity();
       handleApiJobsPost();
+    });
+    server_.on("/api/jobs/xtc", HTTP_GET, [this]() {
+      markActivity();
+      handleApiJobXtc();
+    });
+    server_.on("/xtc-decoder.wasm", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcDecoderWasm();
+    });
+    server_.on("/xtc-decoder.js", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcDecoderJs();
     });
     server_.onNotFound([this]() {
       markActivity();
@@ -267,10 +212,10 @@ bool WebUiServer::requestHasValidSession() {
 
 void WebUiServer::handleRoot() {
   if (!requestHasValidSession()) {
-    server_.send(200, "text/html", kLoginPageHtml);
+    sendGzip(200, "text/html", kLoginPageHtmlGz, kLoginPageHtmlGzLen);
     return;
   }
-  server_.send(200, "text/html", kJobListPageHtml);
+  sendGzip(200, "text/html", kJobListPageHtmlGz, kJobListPageHtmlGzLen);
 }
 
 void WebUiServer::handleLogin() {
@@ -279,16 +224,17 @@ void WebUiServer::handleLogin() {
   // tradeoff here (same class of documented gap as the Pi's own APIs).
   if (server_.arg("pin") != String(pin_)) {
     server_.send(401, "text/html",
-                 "<style>:root{--bg:#fff;--fg:#1a1a1a;--danger:#b3261e;--danger-bg:#fdecea;"
+                 "<style>:root{--bg:#f7ecd1;--fg:#3a2115;--danger:#bd361e;--danger-bg:#f6ded6;"
                  "color-scheme:light dark}"
-                 "@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#eef0f3;"
-                 "--danger:#ff8478;--danger-bg:#3a1a18}}"
-                 "body{background:var(--bg);color:var(--fg);font-family:-apple-system,"
+                 "@media (prefers-color-scheme:dark){:root{--bg:#1c1109;--fg:#f3e3c4;"
+                 "--danger:#ff6a47;--danger-bg:#3a1810}}"
+                 "body{background:var(--bg);color:var(--fg);font-family:\"Nunito Sans\",-apple-system,"
                  "BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif,"
                  "'Apple Color Emoji','Segoe UI Emoji';max-width:320px;margin:3rem auto;"
-                 "padding:0 1rem}</style>"
+                 "padding:0 1rem}"
+                 "a:focus-visible{outline:2px solid var(--danger);outline-offset:2px}</style>"
                  "<p style=\"color:var(--danger);background:var(--danger-bg);padding:.75rem;"
-                 "border-radius:8px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
+                 "border-radius:16px\">Wrong PIN. <a href=\"/\">Try again</a>.</p>");
     return;
   }
   String cookie = String("session=") + sessionToken_ + "; Path=/; HttpOnly";
@@ -314,6 +260,51 @@ void WebUiServer::handleApiStatus() {
   }
   doc["job_count"] = total;
   doc["unread_count"] = unread;
+  // Local SD-card state, meaningful in both modes — not gated on
+  // connectivity the way pi_admin_base_url/wifi_rssi below are.
+  doc["outbox_pending"] = outbox_ != nullptr ? outbox_->countUnsynced() : 0;
+  if (deviceConfig_ != nullptr) {
+    doc["device_id"] = deviceConfig_->deviceId;
+  }
+  // Only in station mode: hotspot mode's phone has no network path to the
+  // Pi at all (see docs/architecture.md "On-device Web UI full-document
+  // preview"), so there's nothing useful to link to there even if this
+  // device happens to have been paired with the admin console enabled.
+  // Same reasoning for wifi_rssi — "signal to the AP" is meaningless when
+  // this device is itself the AP.
+  if (mode_ == WebUiMode::Station) {
+    if (deviceConfig_ != nullptr && deviceConfig_->hasAdminConsole) {
+      doc["pi_admin_base_url"] = deviceConfig_->piAdminBaseUrl;
+    }
+    net::WifiManager wifi;
+    doc["wifi_rssi"] = wifi.rssi();
+  }
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+// Split from handleApiStatus() rather than folded in: /api/status is polled
+// every 20s by the job-list page, and device_name/id/panel size/uptime
+// don't need that freshness — bloating the hot-polled payload with static
+// data would waste bytes on the hotspot AP's own limited bandwidth (the
+// same reasoning firmware/src/ui/pages/generate_pages_header.py's docstring
+// gives for gzip-embedding the pages themselves). The job-list page fetches
+// this once, lazily, only if the diagnostics panel is opened.
+void WebUiServer::handleApiDiag() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+
+  JsonDocument doc;
+  doc["device_name"] =
+      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Xteink X4";
+  doc["device_id"] = deviceConfig_ != nullptr ? deviceConfig_->deviceId : "";
+  doc["panel_width"] = panelWidth_;
+  doc["panel_height"] = panelHeight_;
+  doc["uptime_seconds"] = (millis() - wakeMillis_) / 1000;
 
   String out;
   serializeJson(doc, out);
@@ -335,7 +326,10 @@ void WebUiServer::handleApiJobsGet() {
     j["job_id"] = e.jobId;
     j["title"] = e.title;
     j["page_count"] = e.pageCount;
-    j["status"] = static_cast<uint8_t>(e.status);
+    j["status"] = jobStatusLabel(e.status);
+    j["xtc_bytes"] = e.xtcBytes;
+    j["xtc_sha256"] = e.xtcSha256;
+    j["created_at"] = e.createdAt;
     j["pending_approval"] = outbox_ != nullptr && outbox_->hasPendingForJob(e.jobId);
   }
 
@@ -394,6 +388,72 @@ void WebUiServer::handleApiJobsPost() {
   String out;
   serializeJson(errDoc, out);
   server_.send(code, "application/json", out);
+}
+
+void WebUiServer::handleApiJobXtc() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  if (jobs_ == nullptr) {
+    server_.send(500, "application/json", "{\"error\":\"not ready\"}");
+    return;
+  }
+
+  String jobId = server_.arg("job_id");
+  const store::JobEntry* entry = jobs_->find(jobId.c_str());
+  if (entry == nullptr) {
+    server_.send(404, "application/json", "{\"error\":\"unknown_job\"}");
+    return;
+  }
+
+  FsFile file = SdMan.open(entry->xtcPath, O_RDONLY);
+  if (!file) {
+    server_.send(500, "application/json", "{\"error\":\"io_error\"}");
+    return;
+  }
+
+  // Streamed straight from SD in bounded chunks (never a whole-file
+  // buffer), same reasoning as xtc::XtcReader.cpp's own bulk-copy path —
+  // the client (tools/xtc-wasm/xtc_decoder.cpp, via ui/pages/joblist.html's
+  // preview button) does its own parsing/bounds-checking on these raw
+  // bytes, same as any other untrusted input.
+  server_.setContentLength(entry->xtcBytes);
+  server_.send(200, "application/octet-stream", "");
+
+  uint8_t buf[kXtcStreamChunkBytes];
+  uint32_t remaining = entry->xtcBytes;
+  while (remaining > 0) {
+    size_t toRead = remaining < sizeof(buf) ? remaining : sizeof(buf);
+    int n = file.read(buf, toRead);
+    if (n <= 0) break;  // io error mid-stream; client sees a short body and treats decode as failed
+    server_.sendContent(reinterpret_cast<const char*>(buf), static_cast<size_t>(n));
+    remaining -= static_cast<uint32_t>(n);
+  }
+  file.close();
+}
+
+void WebUiServer::handleXtcDecoderWasm() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  sendGzip(200, "application/wasm", kXtcDecoderWasmGz, kXtcDecoderWasmGzLen);
+}
+
+void WebUiServer::handleXtcDecoderJs() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  sendGzip(200, "application/javascript", kXtcDecoderJsGz, kXtcDecoderJsGzLen);
+}
+
+void WebUiServer::sendGzip(int code, const char* contentType, const unsigned char* data, size_t len) {
+  server_.sendHeader("Content-Encoding", "gzip");
+  server_.setContentLength(len);
+  server_.send(code, contentType, "");
+  server_.sendContent(reinterpret_cast<const char*>(data), len);
 }
 
 void WebUiServer::handleNotFound() { server_.send(404, "text/plain", "Not found"); }

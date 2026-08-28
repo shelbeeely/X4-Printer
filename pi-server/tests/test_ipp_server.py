@@ -86,6 +86,32 @@ def test_print_job_ingests_document_and_stores_original(running_ipp_server):
     assert Path(jobs[0]["original_path"]).read_bytes() == pdf_bytes
 
 
+def test_print_job_generates_thumbnail_from_first_page(running_ipp_server):
+    url, db = running_ipp_server
+    pdf_bytes = make_test_pdf(pages=2)
+    extra = _attr_str(0x49, "document-format", "application/pdf") + _attr_str(0x42, "job-name", "Thumb Test")
+    request = _ipp_request(IPP_OP_PRINT_JOB, 2, extra_attrs=extra, document=pdf_bytes)
+    req = urllib.request.Request(url, data=request, headers={"Content-Type": "application/ipp"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+    jobs = db.list_all_jobs()
+    assert len(jobs) == 1
+    thumbnail_path = jobs[0]["thumbnail_path"]
+    assert thumbnail_path, "thumbnail_path should be populated for a job that converted successfully"
+
+    from pathlib import Path
+
+    from PIL import Image
+
+    data = Path(thumbnail_path).read_bytes()
+    assert data[:2] == b"\xff\xd8", "should be a real JPEG (SOI marker)"
+    img = Image.open(Path(thumbnail_path))
+    assert img.format == "JPEG"
+    # Downscaled from the panel's 800x480, aspect ratio preserved (max_width=160).
+    assert img.width <= 160
+
+
 def test_print_job_rejects_empty_document(running_ipp_server):
     url, db = running_ipp_server
     request = _ipp_request(IPP_OP_PRINT_JOB, 3, document=b"")
