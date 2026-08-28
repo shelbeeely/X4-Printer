@@ -62,7 +62,13 @@ def test_keep_and_delete_actions_update_status_without_printing(db: Database, co
 
 
 def test_print_with_no_cups_queue_configured_records_failure_not_crash(db: Database, tmp_path):
-    cfg = Config(data_dir=tmp_path / "data2", cups_queue="", lp_binary="lp")
+    cfg = Config(
+        data_dir=tmp_path / "data2",
+        cups_queue="",
+        lp_binary="lp",
+        tls_cert=tmp_path / "data2" / "tls" / "server.crt",
+        tls_key=tmp_path / "data2" / "tls" / "server.key",
+    )
     cfg.ensure_dirs()
     job_id = _insert_job(db, cfg)
 

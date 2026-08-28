@@ -54,6 +54,8 @@ def pi_stack(tmp_path: Path, fake_lp_binary: FakeLpBinary):
         sync_port=0,
         panel_width=800,
         panel_height=480,
+        tls_cert=tmp_path / "pi-data" / "tls" / "server.crt",
+        tls_key=tmp_path / "pi-data" / "tls" / "server.key",
     )
     config.ensure_dirs()
     db = Database(config.db_path)
