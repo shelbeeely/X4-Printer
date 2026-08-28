@@ -34,6 +34,10 @@ class DownloadedJob:
     page_count: int
     xtc_bytes: bytes
     verified: bool
+    # Optional landscape-strip variant (docs/protocol.md §1.1/§4) -- None
+    # when this job has none.
+    landscape_xtc_bytes: Optional[bytes] = None
+    landscape_verified: bool = False
 
 
 @dataclass
@@ -89,8 +93,11 @@ class X4Client:
         with self._request("GET", f"{self.base_url}/devices/{self.device_id}/jobs?status=pending") as resp:
             return json.loads(resp.read())["jobs"]
 
-    def download_job(self, job_id: str, expected_sha256: str) -> DownloadedJob:
-        with self._request("GET", f"{self.base_url}/jobs/{job_id}/xtc") as resp:
+    def download_job(self, job_id: str, expected_sha256: str, variant: Optional[str] = None) -> DownloadedJob:
+        url = f"{self.base_url}/jobs/{job_id}/xtc"
+        if variant is not None:
+            url += f"?variant={variant}"
+        with self._request("GET", url) as resp:
             data = resp.read()
             server_sha = resp.headers.get("X-Content-SHA256", "")
 
@@ -98,8 +105,11 @@ class X4Client:
         verified = computed == expected_sha256 == server_sha
         return DownloadedJob(job_id=job_id, title="", page_count=0, xtc_bytes=data, verified=verified)
 
-    def ack_job(self, job_id: str, sha256: str) -> dict:
-        with self._request("POST", f"{self.base_url}/jobs/{job_id}/ack", body={"sha256": sha256}) as resp:
+    def ack_job(self, job_id: str, sha256: str, landscape_sha256: Optional[str] = None) -> dict:
+        body = {"sha256": sha256}
+        if landscape_sha256 is not None:
+            body["landscape_sha256"] = landscape_sha256
+        with self._request("POST", f"{self.base_url}/jobs/{job_id}/ack", body=body) as resp:
             return json.loads(resp.read())
 
     def submit_approval(self, job_id: str, action: str, approval_id: Optional[str] = None) -> dict:
@@ -126,10 +136,21 @@ class X4Client:
             job.page_count = manifest["page_count"]
             if not job.verified:
                 raise RuntimeError(f"hash mismatch downloading job {manifest['job_id']}")
-            self.ack_job(job.job_id, manifest["xtc_sha256"])
+
+            landscape_sha256 = manifest.get("landscape_xtc_sha256")
+            if landscape_sha256:
+                landscape_job = self.download_job(manifest["job_id"], landscape_sha256, variant="landscape")
+                if not landscape_job.verified:
+                    raise RuntimeError(f"hash mismatch downloading landscape variant of job {manifest['job_id']}")
+                job.landscape_xtc_bytes = landscape_job.xtc_bytes
+                job.landscape_verified = True
+
+            self.ack_job(job.job_id, manifest["xtc_sha256"], landscape_sha256=landscape_sha256)
             if download_dir is not None:
                 download_dir.mkdir(parents=True, exist_ok=True)
                 (download_dir / f"{job.job_id}.xtc").write_bytes(job.xtc_bytes)
+                if job.landscape_xtc_bytes is not None:
+                    (download_dir / f"{job.job_id}_landscape.xtc").write_bytes(job.landscape_xtc_bytes)
             downloaded.append(job)
         return downloaded
 

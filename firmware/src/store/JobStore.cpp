@@ -38,6 +38,10 @@ bool loadJobIndex(JobIndex& index) {
     e.pageCount = j["page_count"] | 0;
     e.createdAt = j["created_at"] | 0;
     e.status = static_cast<JobStatus>(uint8_t(j["status"] | 0));
+    std::strncpy(e.landscapeXtcPath, j["landscape_xtc_path"] | "", sizeof(e.landscapeXtcPath) - 1);
+    e.landscapeXtcBytes = j["landscape_xtc_bytes"] | 0;
+    std::strncpy(e.landscapeXtcSha256, j["landscape_xtc_sha256"] | "", sizeof(e.landscapeXtcSha256) - 1);
+    e.landscapePageCount = j["landscape_page_count"] | 0;
     if (e.jobId[0] == '\0') continue;
     index.upsert(e);  // never fails to grow past capacity here: the file was itself capacity-bounded when written
   }
@@ -58,6 +62,10 @@ bool saveJobIndex(const JobIndex& index) {
     j["page_count"] = e.pageCount;
     j["created_at"] = e.createdAt;
     j["status"] = static_cast<uint8_t>(e.status);
+    j["landscape_xtc_path"] = e.landscapeXtcPath;
+    j["landscape_xtc_bytes"] = e.landscapeXtcBytes;
+    j["landscape_xtc_sha256"] = e.landscapeXtcSha256;
+    j["landscape_page_count"] = e.landscapePageCount;
   }
 
   String out;

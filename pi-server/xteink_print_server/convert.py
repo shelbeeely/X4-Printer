@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import io
 import logging
+from enum import Enum
 from typing import Callable, Iterator, Optional
 
 import fitz  # PyMuPDF
 from PIL import Image
 
-from .xtc_writer import XtcMetadata, encode_xtc, prepare_page_image
+from .xtc_writer import ConversionError, XtcMetadata, encode_xtc, prepare_landscape_strip_images, prepare_page_image
 
 logger = logging.getLogger("xteink.convert")
 
@@ -37,8 +38,19 @@ SUPPORTED_MIME_TYPES = {
 }
 
 
-class ConversionError(Exception):
-    pass
+class RenderMode(Enum):
+    # Whole page fit into the panel, aspect-preserved, letterboxed -- the
+    # original and still-default mode (prepare_page_image).
+    FIT_PAGE = "fit_page"
+    # Page split into panel-native, pre-rotated strips meant to be read
+    # with the device turned 90 degrees -- see xtc_writer's
+    # prepare_landscape_strip_images for the geometry.
+    LANDSCAPE_STRIPS = "landscape_strips"
+
+# ConversionError itself now lives in xtc_writer.py (imported above) to
+# avoid a circular import -- xtc_writer's own prepare_landscape_strip_images
+# raises it too. Re-imported here so existing `from .convert import
+# ConversionError` call sites (e.g. ipp_server.py) keep working unchanged.
 
 
 def _iter_pdf_pages(document_bytes: bytes, dpi: int) -> Iterator[Image.Image]:
@@ -109,25 +121,31 @@ def convert_document_to_xtc(
     target_width: int,
     target_height: int,
     dpi: int = 150,
+    mode: RenderMode = RenderMode.FIT_PAGE,
     on_first_page: Optional[Callable[[Image.Image], None]] = None,
 ) -> tuple[bytes, int]:
     """Returns (xtc_bytes, page_count). Raises ConversionError on failure.
 
-    on_first_page, if given, is called once with the first page's already-
-    prepared (resized+dithered) image — lets a caller (ipp_server.py)
-    derive a thumbnail from the exact bitmap already rendered here, without
-    a second PDF render or holding every page past when encode_xtc needs
-    them."""
+    on_first_page, if given, is called once with the first *output* image
+    (the first prepared page, or the first strip of the first page in
+    LANDSCAPE_STRIPS mode) — lets a caller (ipp_server.py) derive a
+    thumbnail from the exact bitmap already rendered here, without a second
+    PDF render or holding every page past when encode_xtc needs them."""
     prepared_pages: list[Image.Image] = []
     page_count = 0
     for source_page in iter_source_pages(document_bytes, mime, dpi):
-        prepared = prepare_page_image(source_page, target_width, target_height)
-        prepared_pages.append(prepared)
-        if page_count == 0 and on_first_page is not None:
-            on_first_page(prepared)
-        page_count += 1
-        if page_count > MAX_PAGE_COUNT:
-            raise ConversionError(f"document exceeds the maximum supported page count ({MAX_PAGE_COUNT})")
+        if mode is RenderMode.LANDSCAPE_STRIPS:
+            new_images = prepare_landscape_strip_images(source_page, target_width, target_height)
+        else:
+            new_images = [prepare_page_image(source_page, target_width, target_height)]
+
+        for prepared in new_images:
+            prepared_pages.append(prepared)
+            if page_count == 0 and on_first_page is not None:
+                on_first_page(prepared)
+            page_count += 1
+            if page_count > MAX_PAGE_COUNT:
+                raise ConversionError(f"document exceeds the maximum supported page count ({MAX_PAGE_COUNT})")
 
     if page_count == 0:
         raise ConversionError("document produced zero renderable pages")

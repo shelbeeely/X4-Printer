@@ -31,7 +31,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from .config import Config
-from .convert import ConversionError, SUPPORTED_MIME_TYPES, convert_document_to_xtc, render_thumbnail_jpeg
+from .convert import ConversionError, RenderMode, SUPPORTED_MIME_TYPES, convert_document_to_xtc, render_thumbnail_jpeg
 from .db import Database
 from .util import sha256_file
 
@@ -407,12 +407,37 @@ class IppRequestHandler(BaseHTTPRequestHandler):
             logger.error("conversion failed for job %r: %s", title, exc)
             return None
 
+        # Landscape-strip rendering is best-effort: it can fail on page
+        # shapes that would need too many strips (see xtc_writer's
+        # max_strips guard) even when the normal rendering above already
+        # succeeded. A failure here must never block ingestion -- the job
+        # just ships without a landscape variant, same "empty means not
+        # available" contract as thumbnail_bytes_holder above.
+        landscape_xtc_bytes: Optional[bytes] = None
+        landscape_page_count = 0
+        try:
+            landscape_xtc_bytes, landscape_page_count = convert_document_to_xtc(
+                document,
+                mime,
+                title=title,
+                target_width=self.config.panel_width,
+                target_height=self.config.panel_height,
+                dpi=self.config.render_dpi,
+                mode=RenderMode.LANDSCAPE_STRIPS,
+            )
+        except ConversionError as exc:
+            logger.warning("landscape-strip conversion skipped for job %r: %s", title, exc)
+
         job_id = uuid.uuid4().hex
         ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}.get(mime, "bin")
         original_path = self.config.originals_dir / f"{job_id}.{ext}"
         original_path.write_bytes(document)
         xtc_path = self.config.xtc_dir / f"{job_id}.xtc"
         xtc_path.write_bytes(xtc_bytes)
+
+        landscape_xtc_path = self.config.xtc_dir / f"{job_id}_landscape.xtc"
+        if landscape_xtc_bytes is not None:
+            landscape_xtc_path.write_bytes(landscape_xtc_bytes)
 
         thumbnail_path = self.config.thumbnails_dir / f"{job_id}.jpg"
         if thumbnail_bytes_holder:
@@ -429,6 +454,10 @@ class IppRequestHandler(BaseHTTPRequestHandler):
             xtc_sha256=sha256_file(xtc_path),
             page_count=page_count,
             thumbnail_path=str(thumbnail_path) if thumbnail_bytes_holder else "",
+            xtc_landscape_path=str(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
+            xtc_landscape_bytes=len(landscape_xtc_bytes) if landscape_xtc_bytes is not None else 0,
+            xtc_landscape_sha256=sha256_file(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
+            xtc_landscape_page_count=landscape_page_count,
         )
         logger.info("ingested job %s %r (%d pages, %d bytes original)", stored_id, title, page_count, len(document))
         return stored_id

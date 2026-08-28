@@ -18,7 +18,7 @@ DEVICE_TOKEN = "supersecrettoken"
 ADMIN_PASSWORD = "let-me-in"
 
 
-def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False) -> str:
+def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False, with_landscape=False) -> str:
     xtc_path = config.xtc_dir / "job1.xtc"
     xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
     original_path = config.originals_dir / "job1.pdf"
@@ -28,6 +28,15 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False)
         thumb = config.thumbnails_dir / "job1.jpg"
         thumb.write_bytes(b"\xff\xd8\xff-fake-jpeg-bytes")
         thumbnail_path = str(thumb)
+    xtc_landscape_path = ""
+    xtc_landscape_bytes = 0
+    xtc_landscape_sha256 = ""
+    if with_landscape:
+        landscape_path = config.xtc_dir / "job1_landscape.xtc"
+        landscape_path.write_bytes(b"XTC" + b"\x00" * 200)
+        xtc_landscape_path = str(landscape_path)
+        xtc_landscape_bytes = landscape_path.stat().st_size
+        xtc_landscape_sha256 = sha256_file(landscape_path)
     return db.insert_job(
         title=title,
         source="ipp",
@@ -39,6 +48,10 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False)
         xtc_sha256=sha256_file(xtc_path),
         page_count=1,
         thumbnail_path=thumbnail_path,
+        xtc_landscape_path=xtc_landscape_path,
+        xtc_landscape_bytes=xtc_landscape_bytes,
+        xtc_landscape_sha256=xtc_landscape_sha256,
+        xtc_landscape_page_count=2 if with_landscape else 0,
     )
 
 
@@ -245,6 +258,19 @@ def test_job_action_purge_removes_thumbnail_when_present(running_admin_api):
     resp = json.loads(_post(f"{base}/jobs/{job_id}/action", {"action": "purge"}).read())
     assert resp["status"] == "purged"
     assert not Path(row["thumbnail_path"]).exists()
+
+
+def test_job_action_purge_removes_landscape_variant_when_present(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config, with_landscape=True)
+    row = db.get_job(job_id)
+    from pathlib import Path
+
+    assert Path(row["xtc_landscape_path"]).exists()
+
+    resp = json.loads(_post(f"{base}/jobs/{job_id}/action", {"action": "purge"}).read())
+    assert resp["status"] == "purged"
+    assert not Path(row["xtc_landscape_path"]).exists()
 
 
 def test_job_action_unknown_action_rejected(running_admin_api):

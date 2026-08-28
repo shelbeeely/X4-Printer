@@ -143,13 +143,16 @@ int SyncClient::fetchPendingJobs(JobManifest* out, size_t maxCount) {
     m.xtcBytes = job["xtc_bytes"] | 0;
     std::strncpy(m.xtcSha256, job["xtc_sha256"] | "", sizeof(m.xtcSha256) - 1);
     m.pageCount = job["page_count"] | 0;
+    m.landscapeXtcBytes = job["landscape_xtc_bytes"] | 0;
+    std::strncpy(m.landscapeXtcSha256, job["landscape_xtc_sha256"] | "", sizeof(m.landscapeXtcSha256) - 1);
+    m.landscapePageCount = job["landscape_page_count"] | 0;
     n++;
   }
   return static_cast<int>(n);
 }
 
 bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const char* expectedSha256Hex,
-                                  uint32_t expectedBytes) {
+                                  uint32_t expectedBytes, const char* variant) {
   if (!piConfigured()) return false;
 
   WiFiClientSecure client;
@@ -160,6 +163,7 @@ bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const 
   http.setTimeout(kHttpTimeoutMs);
 
   String url = String(cfg_.piBaseUrl) + "/jobs/" + jobId + "/xtc";
+  if (variant != nullptr) url += String("?variant=") + variant;
   if (!http.begin(client, url)) return false;
   http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
   http.addHeader("X-Device-Id", cfg_.deviceId);
@@ -250,7 +254,7 @@ bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const 
   return true;
 }
 
-bool SyncClient::ackJob(const char* jobId, const char* sha256Hex) {
+bool SyncClient::ackJob(const char* jobId, const char* sha256Hex, const char* landscapeSha256Hex) {
   if (!piConfigured()) return false;
 
   WiFiClientSecure client;
@@ -268,6 +272,7 @@ bool SyncClient::ackJob(const char* jobId, const char* sha256Hex) {
 
   JsonDocument doc;
   doc["sha256"] = sha256Hex;
+  if (landscapeSha256Hex != nullptr) doc["landscape_sha256"] = landscapeSha256Hex;
   String body;
   serializeJson(doc, body);
 

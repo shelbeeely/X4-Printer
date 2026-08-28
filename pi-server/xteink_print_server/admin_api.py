@@ -378,7 +378,7 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self.db.clear_deliveries_and_reset_status(job_id)
             self._send_json(200, {"status": "requeued"})
         elif action == "purge":
-            for field in ("original_path", "xtc_path", "thumbnail_path"):
+            for field in ("original_path", "xtc_path", "thumbnail_path", "xtc_landscape_path"):
                 # thumbnail_path is the first nullable/optional path column
                 # (''  for jobs with no thumbnail — see db.py's migration
                 # default) — the unguarded unlink() below was safe for the

@@ -36,7 +36,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     xtc_sha256 TEXT NOT NULL,
     page_count INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
-    thumbnail_path TEXT NOT NULL DEFAULT ''
+    thumbnail_path TEXT NOT NULL DEFAULT '',
+    xtc_landscape_path TEXT NOT NULL DEFAULT '',
+    xtc_landscape_bytes INTEGER NOT NULL DEFAULT 0,
+    xtc_landscape_sha256 TEXT NOT NULL DEFAULT '',
+    xtc_landscape_page_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS job_deliveries (
@@ -96,6 +100,10 @@ class Database:
         with self._connect() as conn:
             conn.executescript(SCHEMA)
             _ensure_column(conn, "jobs", "thumbnail_path", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "jobs", "xtc_landscape_path", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "jobs", "xtc_landscape_bytes", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(conn, "jobs", "xtc_landscape_sha256", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "jobs", "xtc_landscape_page_count", "INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn"):
@@ -147,14 +155,19 @@ class Database:
         xtc_sha256: str,
         page_count: int,
         thumbnail_path: str = "",
+        xtc_landscape_path: str = "",
+        xtc_landscape_bytes: int = 0,
+        xtc_landscape_sha256: str = "",
+        xtc_landscape_page_count: int = 0,
     ) -> str:
         job_id = uuid.uuid4().hex
         with self.transaction() as conn:
             conn.execute(
                 """INSERT INTO jobs
                    (job_id, title, created_at, source, original_path, original_mime,
-                    original_bytes, xtc_path, xtc_bytes, xtc_sha256, page_count, status, thumbnail_path)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                    original_bytes, xtc_path, xtc_bytes, xtc_sha256, page_count, status, thumbnail_path,
+                    xtc_landscape_path, xtc_landscape_bytes, xtc_landscape_sha256, xtc_landscape_page_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
                 (
                     job_id,
                     title,
@@ -168,6 +181,10 @@ class Database:
                     xtc_sha256,
                     page_count,
                     thumbnail_path,
+                    xtc_landscape_path,
+                    xtc_landscape_bytes,
+                    xtc_landscape_sha256,
+                    xtc_landscape_page_count,
                 ),
             )
         return job_id
