@@ -3,16 +3,18 @@
 ## 1. Build and flash
 
 ```sh
+git submodule update --init firmware/freeink-sdk   # first time only, or after a fresh clone
 cd firmware
-git clone https://github.com/Free-Ink/freeink-sdk   # vendor the SDK checkout the platformio.ini symlinks expect
 pio run -e xteink_x4
 pio run -e xteink_x4 -t upload
 ```
 
-`platformio.ini` mirrors `freeink-sdk/platformio.sample.ini`'s `[env:xteink_x4]`
-(tightest single-device C3 build — see `docs/architecture.md`). If you keep
-the SDK checkout somewhere other than `firmware/freeink-sdk`, edit the
-`symlink://` paths in `platformio.ini`'s `[base].lib_deps`.
+`freeink-sdk` is vendored as a git submodule at `firmware/freeink-sdk` (see
+`.gitmodules`) — the exact path `platformio.ini`'s `symlink://freeink-sdk/...`
+`lib_deps` expect. `platformio.ini` mirrors `freeink-sdk/platformio.sample.ini`'s
+`[env:xteink_x4]` (tightest single-device C3 build — see `docs/architecture.md`).
+If you keep the SDK checkout somewhere other than `firmware/freeink-sdk`, edit
+the `symlink://` paths in `platformio.ini`'s `[base].lib_deps`.
 
 Host-side unit tests (pure-logic modules, no Arduino toolchain or hardware
 needed) live separately:

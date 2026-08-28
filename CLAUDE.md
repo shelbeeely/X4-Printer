@@ -51,10 +51,12 @@ cd firmware/test && cmake -B build && cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Firmware build/flash (requires a `freeink-sdk` checkout as a sibling of
-`firmware/src` — `firmware/platformio.ini`'s `lib_deps` resolve via
-`symlink://freeink-sdk/...`, and it is not present in a fresh checkout of
-this repo alone):
+Firmware build/flash (requires the `firmware/freeink-sdk` git submodule —
+`firmware/platformio.ini`'s `lib_deps` resolve via `symlink://freeink-sdk/...`
+relative to `firmware/`, matching the submodule's path. A plain `git clone`
+of this repo does not populate submodule contents; run `git submodule
+update --init firmware/freeink-sdk` first, or clone with
+`--recurse-submodules`):
 
 ```sh
 cd firmware && pio run -e xteink_x4            # build
