@@ -305,6 +305,13 @@ void WebUiServer::handleApiDiag() {
   doc["panel_width"] = panelWidth_;
   doc["panel_height"] = panelHeight_;
   doc["uptime_seconds"] = (millis() - wakeMillis_) / 1000;
+  // sdUsedBytes() scans the FAT and is cached with a 20s TTL by SDCardManager
+  // itself (see SDCardManager.h) -- cheap enough to call on every lazy diag
+  // fetch without adding our own caching layer on top.
+  const uint64_t sdTotal = SdMan.sdTotalBytes();
+  const uint64_t sdUsed = SdMan.sdUsedBytes();
+  doc["sd_total_bytes"] = sdTotal;
+  doc["sd_free_bytes"] = sdTotal >= sdUsed ? sdTotal - sdUsed : 0;
 
   String out;
   serializeJson(doc, out);

@@ -194,6 +194,10 @@ function renderSyncBanner(s) {
 
 // ---------------- Device diagnostics (lazy-fetched once, on expand) ----------------
 
+function fmtGB(bytes) {
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+}
+
 let diagLoaded = false;
 document.getElementById('diag').addEventListener('toggle', async function (e) {
   if (!e.target.open || diagLoaded) return;
@@ -209,6 +213,9 @@ document.getElementById('diag').addEventListener('toggle', async function (e) {
     ['Panel', d.panel_width + '×' + d.panel_height],
     ['Uptime', Math.floor(d.uptime_seconds / 60) + ' min'],
   ];
+  if (d.sd_total_bytes) {
+    rows.push(['Storage', fmtGB(d.sd_free_bytes) + ' free of ' + fmtGB(d.sd_total_bytes)]);
+  }
   for (const pair of rows) {
     const p = document.createElement('p');
     p.textContent = pair[0] + ': ' + pair[1];
