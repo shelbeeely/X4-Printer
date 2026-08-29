@@ -59,10 +59,7 @@ name: Deploy Pages
 
 on:
   push:
-    # NOTE: this repo has no `main` yet -- the feature branch below IS the
-    # default branch for now. Update this to `main` once/if this repo
-    # adopts one.
-    branches: [claude/xteink-print-inbox-system-6lh4v6]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

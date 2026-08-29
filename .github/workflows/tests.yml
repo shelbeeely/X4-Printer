@@ -33,7 +33,7 @@ name: Tests
 on:
   push:
     branches:
-      - claude/xteink-print-inbox-system-6lh4v6
+      - main
   pull_request:
 
 jobs:
