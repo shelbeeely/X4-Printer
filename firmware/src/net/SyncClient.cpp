@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <SDCardManager.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <mbedtls/sha256.h>
 

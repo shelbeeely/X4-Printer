@@ -6,7 +6,7 @@
 
 #include "net/WifiManager.h"
 
-namespace sync {
+namespace syncmgr {
 
 namespace {
 constexpr size_t kSyncBatchSize = 16;
@@ -149,4 +149,4 @@ void SyncManager::drainApprovalOutbox(net::SyncClient& client, SyncSummary& summ
   }
 }
 
-}  // namespace sync
+}  // namespace syncmgr

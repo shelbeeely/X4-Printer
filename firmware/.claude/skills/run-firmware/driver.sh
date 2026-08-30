@@ -36,12 +36,11 @@ do_try_device_build() {
     exit 1
   fi
   echo "Attempting a real ESP32-C3 build (env: xteink_x4)..."
-  echo "Known-likely outcome in a sandboxed/agent environment: PlatformIO's own"
-  echo "toolchain bootstrap needs to fetch pioarduino/platformio-core from GitHub"
-  echo "(a DIFFERENT repo than this one) -- if this session's GitHub access is"
-  echo "scoped to only this repo, that request 403s and the build cannot proceed"
-  echo "past 'Failed to install Python dependencies into penv'. This is a session"
-  echo "access-scope limitation, not a problem with this repo or freeink-sdk."
+  echo "If this fails during PlatformIO's own toolchain bootstrap (not this"
+  echo "repo's code), see SKILL.md's Gotchas section for two known sandbox"
+  echo "environment failure modes and their fixes: a GitHub archive-download"
+  echo "scope issue fetching pioarduino/platformio-core, and a CA-bundle"
+  echo "override bug in penv_setup.py that breaks later downloads' TLS trust."
   echo
   pio run -e xteink_x4
 }

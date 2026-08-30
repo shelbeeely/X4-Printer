@@ -74,7 +74,7 @@ struct InboxUiState {
   // normal view.
   bool landscapeView = false;
 
-  sync::SyncSummary lastSyncSummary;
+  syncmgr::SyncSummary lastSyncSummary;
   bool hasSyncedOnce = false;
 
   // Set by main.cpp before each app.render() call so screen functions can
