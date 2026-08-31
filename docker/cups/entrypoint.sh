@@ -3,7 +3,7 @@
 # (cups-pdf backend) that other services on the compose network can submit
 # to.
 #
-# History, because both wrong turns here are non-obvious and worth not
+# History, because none of these wrong turns are obvious and worth not
 # re-discovering:
 #   1. First version: started `cupsd` (self-daemonizing), configured it via
 #      lpadmin/cupsctl, then killed it and exec'd a *second*, foreground
@@ -12,17 +12,35 @@
 #      daemon, and printer_forward.py's real `lp` call moments later hit
 #      the fresh second daemon with "the printer or class does not exist".
 #   2. Second version: tried to avoid the restart by running `cupsd -f &`
-#      (foreground mode, backgrounded as a shell job) and configuring that
-#      one directly. CI showed a different, well-known-once-you-hit-it
-#      problem: `cupsd -f &` under dash's non-interactive job control
-#      breaks the client tools' local-socket connection ("cupsctl: Unable
-#      to connect to server: Bad file descriptor").
-# This version: start `cupsd` the normal way (no -f; it self-daemonizes,
-# and that daemonized process's fds are unaffected by dash job-control
-# quirks), configure it, and then just wait on that SAME already-running
-# daemon by PID -- no restart, no backgrounded foreground mode, no window
-# where the queue config could race a second daemon reading it back.
+#      (foreground mode, backgrounded as a shell job). CI showed
+#      "cupsctl: Unable to connect to server: Bad file descriptor" and it
+#      looked like a dash job-control quirk specific to `-f &`.
+#   3. Third version: went back to plain self-daemonizing `cupsd` (no -f,
+#      no restart at all). CI showed the SAME "Bad file descriptor" error,
+#      this time from `lpadmin` -- which rules out (2)'s theory. The actual
+#      pattern across all three attempts: `lpstat` (an unprivileged query)
+#      has connected successfully every single time; `cupsctl`/`lpadmin`
+#      (both need local-admin trust) are the only commands that ever fail
+#      this way. That points at CUPS's local-domain-socket admin auth
+#      (peer-credential trust over /run/cups/cups.sock), not at cupsd's
+#      foreground/background mode, which was a red herring.
+# This version tests that theory directly: force every admin-privileged
+# client command over TCP to localhost:631 (`-h localhost:631`) instead of
+# the default local domain socket, since that's a different connection and
+# auth path in libcups. If this *still* fails, the diagnostics below
+# (process list, /run/cups contents, un-suppressed stderr) are there so the
+# next attempt has real evidence instead of another guess.
 set -eu
+
+echo "entrypoint.sh: starting as $(id)"
+
+# Defensive: clear any state that might have been left behind by the
+# `apt-get install printer-driver-cups-pdf` postinst's own attempted
+# cupsd reload during the image build (CI showed "CUPS failed to reload
+# its configuration!" at that step) -- cupsd recreates this directory
+# fresh on its own, so removing it first costs nothing either way.
+rm -rf /run/cups
+mkdir -p /run/cups
 
 /usr/sbin/cupsd
 
@@ -33,39 +51,36 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
+echo "entrypoint.sh: cupsd is answering; /run/cups contents:"
+ls -la /run/cups 2>&1 || true
+
 # Remote/anonymous access, no CUPS-level auth -- this container only ever
 # exists on docker-compose's private test network (docker-compose.test.yml),
-# never exposed beyond it. `cupsctl --remote-any` is the standard shortcut
-# for "accept connections from other hosts, no auth" (opens Listen/Allow
-# directives it would otherwise take several individual `cupsctl` calls to
-# set).
-cupsctl --remote-any WebInterface=no
+# never exposed beyond it. `-h localhost:631` forces this over TCP rather
+# than the local domain socket -- see header comment.
+cupsctl -h localhost:631 --remote-any WebInterface=no
 
 # printer-driver-cups-pdf's own postinst normally registers a "PDF" queue
 # automatically; this is a defensive fallback for images/versions where it
-# doesn't (observed in CI: "CUPS failed to reload its configuration! /
-# Skipped automated creation of the PDF queue." during `apt-get install`,
-# because cupsd isn't running inside a `docker build` layer for the
-# postinst's own lpadmin call to reach), so container startup never
-# silently ships with no queue at all.
-if ! lpstat -p PDF >/dev/null 2>&1; then
+# doesn't, so container startup never silently ships with no queue at all.
+if ! lpstat -h localhost:631 -p PDF >/dev/null 2>&1; then
   ppd="$(find /usr/share/ppd -iname 'CUPS-PDF*.ppd' 2>/dev/null | head -n1 || true)"
   if [ -n "$ppd" ]; then
-    lpadmin -p PDF -E -v cups-pdf:/ -P "$ppd"
+    lpadmin -h localhost:631 -p PDF -E -v cups-pdf:/ -P "$ppd"
   else
-    lpadmin -p PDF -E -v cups-pdf:/ -m raw
+    lpadmin -h localhost:631 -p PDF -E -v cups-pdf:/ -m raw
   fi
 fi
 
 # Belt-and-braces: whichever path created it, make sure it's enabled and
 # accepting jobs (a fresh dpkg install can leave a queue disabled/rejecting
 # until explicitly told otherwise).
-cupsaccept PDF 2>/dev/null || true
-cupsenable PDF 2>/dev/null || true
-lpadmin -p PDF -E
+cupsaccept -h localhost:631 PDF 2>/dev/null || true
+cupsenable -h localhost:631 PDF 2>/dev/null || true
+lpadmin -h localhost:631 -p PDF -E
 
 echo "entrypoint.sh: PDF queue ready:"
-lpstat -p PDF
+lpstat -h localhost:631 -p PDF
 
 # Marker file for docker-compose.test.yml's healthcheck -- see its comment
 # for why `lpstat -p PDF` alone isn't a reliable enough signal on its own.
