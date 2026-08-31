@@ -32,3 +32,4 @@ add_test(
 
 add_subdirectory(job_store)
 add_subdirectory(approval_outbox)
+add_subdirectory(calendar_wake)

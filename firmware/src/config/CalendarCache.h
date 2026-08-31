@@ -30,6 +30,17 @@ struct NextEventInfo {
   // screen can show "as of ..." for a stale cache rather than presenting
   // it as live.
   time_t lastSyncedAt = 0;
+
+  // Dedup markers for calendar/WakeSchedule.h's wake reminders: the exact
+  // target time (event start minus lead minutes, or event end) that has
+  // already fired a reminder frame, or 0 if it hasn't. Carried forward
+  // unchanged across sync passes by CalendarSync.cpp so the same event
+  // doesn't re-fire on every subsequent hourly wake -- these deliberately
+  // survive a `set()` call that otherwise replaces the whole record, since
+  // this is state about *this device having shown the reminder*, not
+  // about the event itself.
+  time_t alertedForStart = 0;
+  time_t alertedForEnd = 0;
 };
 
 class CalendarCache {

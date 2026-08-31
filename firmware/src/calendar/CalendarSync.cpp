@@ -64,6 +64,16 @@ void syncCalendars(const config::CalendarConfig& cfg) {
     info.allDay = soonest->allDay;
   }
   info.lastSyncedAt = now;
+  // Carried forward unchanged, not recomputed here -- see
+  // NextEventInfo::alertedForStart/alertedForEnd's comment in
+  // CalendarCache.h. calendar::computeWakeDecision (WakeSchedule.h) is what
+  // actually stamps these when a reminder fires; if the soonest event
+  // changed since the last sync, its stale target simply won't match the
+  // new event's start/end and the reminder logic re-arms itself with no
+  // special-casing needed here.
+  const config::NextEventInfo& previous = config::CalendarCache::instance().data();
+  info.alertedForStart = previous.alertedForStart;
+  info.alertedForEnd = previous.alertedForEnd;
 
   config::CalendarCache::instance().set(info);
   config::CalendarCache::instance().save();

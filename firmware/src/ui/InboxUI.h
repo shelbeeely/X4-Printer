@@ -48,6 +48,21 @@ enum class ScreenMode {
   WebUiChoice,  // "Use Wi-Fi" / "Use Hotspot" / "Cancel" — entry point for the on-device web UI
   WebUi,        // web UI is running: shows connection info + PIN + Stop
   Settings,     // tabbed settings — see SettingsTab
+  // Rendered exactly once on a Timer wake that lands within a configured
+  // calendar-reminder window (Settings > Calendar tab; see
+  // calendar/WakeSchedule.h), then main.cpp sleeps immediately — nobody is
+  // expected to be holding the device when a background timer wake fires,
+  // so there's no interactive follow-up screen for this the way the other
+  // modes have.
+  CalendarReminder,
+};
+
+// Which threshold fired the reminder currently showing (ScreenMode::
+// CalendarReminder) -- set by main.cpp right before it builds/renders the
+// UI for that one frame.
+enum class CalendarReminderKind : uint8_t {
+  BeforeStart,
+  AtEnd,
 };
 
 // One tab per settings group, matching the "tabbed groups" convention the
@@ -62,8 +77,10 @@ enum class SettingsTab : uint8_t {
   SyncRelay = 1,  // pairing/relay info -- read-only, provisioned by
                   // pi-server/tools/pair_device.py, not editable on-device
   Display = 2,    // default reading view (portrait/landscape)
-  DeviceInfo = 3,  // firmware version, battery, storage, uptime -- read-only
-  kCount = 4,
+  Calendar = 3,   // wake-before-event / wake-at-event-end reminders -- see
+                  // calendar/WakeSchedule.h
+  DeviceInfo = 4,  // firmware version, battery, storage, uptime -- read-only
+  kCount = 5,
 };
 
 struct InboxUiState {
@@ -111,6 +128,10 @@ struct InboxUiState {
   // one wake window (not saved anywhere; resets to Wifi/-1 next boot).
   SettingsTab settingsTab = SettingsTab::Wifi;
   int16_t settingsWifiRemoveIndex = -1;
+
+  // Set by main.cpp right before it renders the one-shot
+  // ScreenMode::CalendarReminder frame -- see that enum's comment.
+  CalendarReminderKind calendarReminderKind = CalendarReminderKind::BeforeStart;
 
   // Set by main.cpp before each app.render() call so screen functions can
   // reach the raw framebuffer for the reader's direct page write.

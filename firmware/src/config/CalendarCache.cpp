@@ -31,6 +31,8 @@ void CalendarCache::load() {
   data_.end = static_cast<time_t>(doc["end"] | 0);
   data_.allDay = doc["all_day"] | false;
   data_.lastSyncedAt = static_cast<time_t>(doc["last_synced_at"] | 0);
+  data_.alertedForStart = static_cast<time_t>(doc["alerted_for_start"] | 0);
+  data_.alertedForEnd = static_cast<time_t>(doc["alerted_for_end"] | 0);
 }
 
 bool CalendarCache::save() const {
@@ -41,6 +43,8 @@ bool CalendarCache::save() const {
   doc["end"] = static_cast<int64_t>(data_.end);
   doc["all_day"] = data_.allDay;
   doc["last_synced_at"] = static_cast<int64_t>(data_.lastSyncedAt);
+  doc["alerted_for_start"] = static_cast<int64_t>(data_.alertedForStart);
+  doc["alerted_for_end"] = static_cast<int64_t>(data_.alertedForEnd);
 
   String out;
   serializeJson(doc, out);

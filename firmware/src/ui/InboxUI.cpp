@@ -38,7 +38,19 @@ enum : freeink::ui::ActionId {
   ActionSettingsWifiConfirmRemove = 18,
   ActionSettingsWifiCancelRemove = 19,
   ActionSettingsDisplayRowSelect = 20,
+  // One action id for all three Calendar tab rows -- event.value picks the
+  // row, same "list fires one action, the handler reads event.value"
+  // pattern actionMenuScreen/ActionMenuRowSelect uses.
+  ActionSettingsCalendarRowSelect = 21,
 };
+
+// Cycled through on select by the Calendar settings tab's lead-time row --
+// a fixed preset list rather than a free-entry stepper, same reasoning as
+// the Wi-Fi tab's view/remove-only scope: this device has no keyboard/dial
+// to type or scroll an arbitrary number with.
+constexpr uint16_t kCalendarLeadMinutePresets[] = {5, 10, 15, 30, 60};
+constexpr size_t kCalendarLeadMinutePresetCount =
+    sizeof(kCalendarLeadMinutePresets) / sizeof(kCalendarLeadMinutePresets[0]);
 
 const char* statusGlyph(store::JobStatus status) {
   switch (status) {
@@ -339,6 +351,8 @@ const char* settingsTabName(SettingsTab tab) {
       return "Sync & Relay";
     case SettingsTab::Display:
       return "Display";
+    case SettingsTab::Calendar:
+      return "Calendar";
     case SettingsTab::DeviceInfo:
       return "Device Info";
     default:
@@ -421,6 +435,30 @@ void settingsDisplayTab(App::ScreenType& screen, InboxUiState& state) {
   screen.list(&item, 1, 0, ActionSettingsDisplayRowSelect);
 }
 
+// Wake-before-event / wake-at-event-end reminders (calendar/WakeSchedule.h)
+// -- each row toggles/cycles a config::AppSettingsData field and saves
+// immediately, same pattern as settingsDisplayTab's toggle. Meaningless
+// (and harmless to leave configured) until /system/calendars.json is set
+// up -- see docs/setup-x4.md "Calendar idle screen".
+void settingsCalendarTab(App::ScreenType& screen, InboxUiState& state) {
+  if (state.appSettings == nullptr) return;
+  const config::AppSettingsData& settings = *state.appSettings;
+
+  char leadValue[16];
+  std::snprintf(leadValue, sizeof(leadValue), "%u min", settings.calendarWakeLeadMinutes);
+
+  freeink::ui::ListItem items[3] = {
+      {.label = "Wake before start",
+       .actionValue = 0,
+       .toggle = true,
+       .toggleChecked = settings.calendarWakeBeforeStart},
+      {.label = "Lead time", .value = leadValue, .actionValue = 1},
+      {.label = "Wake at event end", .actionValue = 2, .toggle = true, .toggleChecked = settings.calendarWakeAtEnd},
+  };
+  static int16_t selected = 0;
+  screen.list(items, 3, selected, ActionSettingsCalendarRowSelect);
+}
+
 void settingsDeviceInfoTab(App::ScreenType& screen) {
   BatteryMonitor::Status battery = BatteryMonitor().readStatus();
   uint64_t sdTotal = SdMan.sdTotalBytes();
@@ -455,6 +493,9 @@ void settingsScreen(App::ScreenType& screen, void* userPtr) {
     case SettingsTab::Display:
       settingsDisplayTab(screen, state);
       break;
+    case SettingsTab::Calendar:
+      settingsCalendarTab(screen, state);
+      break;
     case SettingsTab::DeviceInfo:
     default:
       settingsDeviceInfoTab(screen);
@@ -469,9 +510,39 @@ void settingsScreen(App::ScreenType& screen, void* userPtr) {
   screen.footer(footer, 3);
 }
 
+// Rendered exactly once on a Timer wake that lands within a configured
+// calendar-reminder window (Settings > Calendar tab), then main.cpp goes
+// straight back to sleep -- see ScreenMode::CalendarReminder's comment in
+// InboxUI.h. No footer: nobody is expected to be holding the device for a
+// background timer wake, and the e-paper panel holds this frame with no
+// power until the next wake redraws it.
+void calendarReminderScreen(App::ScreenType& screen, void* userPtr) {
+  auto& state = *static_cast<InboxUiState*>(userPtr);
+  bool atEnd = state.calendarReminderKind == CalendarReminderKind::AtEnd;
+  screen.header("Reminder", atEnd ? "Event ended" : "Starting soon");
+
+  if (state.nextEvent == nullptr || !state.nextEvent->hasEvent) {
+    screen.popup("");
+    return;
+  }
+
+  struct tm tmv;
+  time_t when = atEnd ? state.nextEvent->end : state.nextEvent->start;
+  gmtime_r(&when, &tmv);  // global, not std:: -- this file includes <time.h>, not <ctime>
+  char timeStr[48];
+  strftime(timeStr, sizeof(timeStr), "%a %b %d, %H:%M UTC", &tmv);
+
+  static char body[160];
+  std::snprintf(body, sizeof(body), "%s\n%s", state.nextEvent->title, timeStr);
+  screen.popup(body);
+}
+
 void screenRouter(App::ScreenType& screen, void* userPtr) {
   auto& state = *static_cast<InboxUiState*>(userPtr);
   switch (state.mode) {
+    case ScreenMode::CalendarReminder:
+      calendarReminderScreen(screen, userPtr);
+      return;
     case ScreenMode::Reader:
       readerScreen(screen, userPtr);
       return;
@@ -754,6 +825,41 @@ void initApp(App& app, InboxUiState& state) {
         s.appSettings->defaultLandscapeView = !s.appSettings->defaultLandscapeView;
         config::AppSettings::instance().setDefaultLandscapeView(s.appSettings->defaultLandscapeView);
         config::AppSettings::instance().save();
+      },
+      &state);
+
+  app.on(
+      ActionSettingsCalendarRowSelect,
+      [](const freeink::ui::ActionEvent& event, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        if (s.appSettings == nullptr) return;
+        config::AppSettings& settings = config::AppSettings::instance();
+        switch (event.value) {
+          case 0:
+            s.appSettings->calendarWakeBeforeStart = !s.appSettings->calendarWakeBeforeStart;
+            settings.setCalendarWakeBeforeStart(s.appSettings->calendarWakeBeforeStart);
+            break;
+          case 1: {
+            uint16_t current = s.appSettings->calendarWakeLeadMinutes;
+            size_t next = 0;
+            for (size_t i = 0; i < kCalendarLeadMinutePresetCount; i++) {
+              if (kCalendarLeadMinutePresets[i] == current) {
+                next = (i + 1) % kCalendarLeadMinutePresetCount;
+                break;
+              }
+            }
+            s.appSettings->calendarWakeLeadMinutes = kCalendarLeadMinutePresets[next];
+            settings.setCalendarWakeLeadMinutes(s.appSettings->calendarWakeLeadMinutes);
+            break;
+          }
+          case 2:
+            s.appSettings->calendarWakeAtEnd = !s.appSettings->calendarWakeAtEnd;
+            settings.setCalendarWakeAtEnd(s.appSettings->calendarWakeAtEnd);
+            break;
+          default:
+            return;
+        }
+        settings.save();
       },
       &state);
 }

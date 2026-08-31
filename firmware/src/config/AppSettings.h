@@ -24,6 +24,14 @@ struct AppSettingsData {
   // that actually have a landscape-strip variant (docs/protocol.md §4);
   // jobs without one always open portrait regardless of this setting.
   bool defaultLandscapeView = false;
+
+  // Calendar wake reminders (Settings > Calendar tab; see
+  // calendar/WakeSchedule.h) -- both independently opt-in and off by
+  // default, since neither means anything until /system/calendars.json is
+  // configured (docs/setup-x4.md "Calendar idle screen").
+  bool calendarWakeBeforeStart = false;
+  uint16_t calendarWakeLeadMinutes = 10;
+  bool calendarWakeAtEnd = false;
 };
 
 class AppSettings {
@@ -39,6 +47,9 @@ class AppSettings {
 
   const AppSettingsData& data() const { return data_; }
   void setDefaultLandscapeView(bool value) { data_.defaultLandscapeView = value; }
+  void setCalendarWakeBeforeStart(bool value) { data_.calendarWakeBeforeStart = value; }
+  void setCalendarWakeLeadMinutes(uint16_t value) { data_.calendarWakeLeadMinutes = value; }
+  void setCalendarWakeAtEnd(bool value) { data_.calendarWakeAtEnd = value; }
 
  private:
   AppSettingsData data_;

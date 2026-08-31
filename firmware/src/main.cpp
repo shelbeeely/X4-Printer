@@ -19,6 +19,7 @@
 #include <PowerManager.h>
 #include <SDCardManager.h>
 
+#include "calendar/WakeSchedule.h"
 #include "config/AppSettings.h"
 #include "config/CalendarCache.h"
 #include "config/CalendarConfig.h"
@@ -72,7 +73,11 @@ void runSyncPass() {
   nextEvent = config::CalendarCache::instance().data();
 }
 
-void goToSleep() {
+// `intervalSeconds` is the caller's already-computed effective sleep
+// duration -- see nextWakeIntervalSeconds() below -- not always
+// kWakeTimerIntervalSeconds: a nearer calendar wake target (Settings >
+// Calendar tab; calendar/WakeSchedule.h) shortens it.
+void goToSleep(uint32_t intervalSeconds) {
   // Nothing else tears down an on-device web UI session (started outside
   // the normal sync flow, see ui/WebUiServer.h) before deep sleep —
   // without this, an AP/STA radio left up by that feature would still be
@@ -86,7 +91,45 @@ void goToSleep() {
   // normally a no-op write, not a load-bearing final flush.
   store::saveJobIndex(jobIndex);
   store::saveApprovalOutbox(outboxIndex);
-  power::SleepManager::sleepUntilNextEvent(kWakeTimerIntervalSeconds);  // noreturn
+  power::SleepManager::sleepUntilNextEvent(intervalSeconds);  // noreturn
+}
+
+// How long to sleep until the next thing that needs this device awake:
+// the regular hourly background sync, or a sooner calendar wake target
+// that hasn't fired yet (Settings > Calendar tab). Used for every sleep
+// that ISN'T itself the moment a calendar reminder fires (that path
+// already has its own freshly computed decision — see setup()'s Timer
+// branch) — the idle-timeout sleep in loop(), and a Timer wake with
+// nothing due right now. Deliberately computes against a scratch copy of
+// nextEvent: this is a read-only "how long" query, never a place that
+// should mark a reminder as fired (that only happens where the frame
+// actually gets rendered).
+uint32_t nextWakeIntervalSeconds() {
+  config::NextEventInfo scratch = nextEvent;
+  calendar::WakeDecision decision =
+      calendar::computeWakeDecision(appSettings, scratch, time(nullptr), kWakeTimerIntervalSeconds);
+  return decision.sleepSeconds;
+}
+
+// Constructs the FreeInkUI App exactly once per boot (the underlying
+// DisplayTarget/App are `static` locals, which can't be declared twice in
+// one function) and runs initApp() the first time. Shared by the normal
+// interactive wake path and the calendar-reminder path below — both need
+// a real App to render a frame, but only one of them runs per boot.
+ui::App& ensureApp() {
+  static freeink::ui::DisplayTarget displayTarget(display.getFrameBuffer(), display.getDisplayWidth(),
+                                                  display.getDisplayHeight(), display.getDisplayWidthBytes());
+  static ui::App appInstance(displayTarget, displayTarget.deviceContext());
+  static bool initialized = false;
+  if (!initialized) {
+    initialized = true;
+    // Deliberately no appInstance.setClearColor(...) — the reader screen
+    // relies on frames NOT being auto-cleared so its raw framebuffer page
+    // write persists under the footer chrome drawn on top of it. See
+    // ui/InboxUI.h's header comment.
+    ui::initApp(appInstance, uiState);
+  }
+  return appInstance;
 }
 
 freeink::ui::InputSnapshot readInputSnapshot() {
@@ -142,23 +185,44 @@ void setup() {
   uiState.panelHeight = display.getDisplayHeight();
 
   if (wakeReason == power::WakeReason::Timer) {
-    // Nobody is looking at the screen for a timer wake: sync silently and
-    // go straight back to sleep without ever building a UI frame. This is
-    // the "use deep sleep aggressively... wake from a timer, synchronize,
-    // then return to sleep" path from the task description.
+    // Nobody is looking at the screen for a plain timer wake: sync
+    // silently. This is the "use deep sleep aggressively... wake from a
+    // timer, synchronize, then return to sleep" path from the task
+    // description — UNLESS a calendar wake target (Settings > Calendar
+    // tab) is due, in which case we render exactly one reminder frame
+    // before sleeping again (see calendar/WakeSchedule.h).
     runSyncPass();
-    goToSleep();  // noreturn
+
+    calendar::WakeDecision decision =
+        calendar::computeWakeDecision(appSettings, nextEvent, time(nullptr), kWakeTimerIntervalSeconds);
+    if (decision.alert == calendar::WakeAlertKind::None) {
+      goToSleep(decision.sleepSeconds);  // noreturn
+    }
+
+    // A reminder is due: computeWakeDecision() already stamped the fired
+    // dedup marker into `nextEvent` above — persist it right away so a
+    // crash or power loss between here and the next sync can't re-fire
+    // the same target, then render the one frame and go straight back to
+    // sleep. The e-paper panel holds that image with no power until the
+    // next wake redraws it, so there's nothing to wait on here.
+    config::CalendarCache::instance().set(nextEvent);
+    config::CalendarCache::instance().save();
+
+    uiState.calendarReminderKind = decision.alert == calendar::WakeAlertKind::BeforeStart
+                                        ? ui::CalendarReminderKind::BeforeStart
+                                        : ui::CalendarReminderKind::AtEnd;
+    uiState.mode = ui::ScreenMode::CalendarReminder;
+
+    app = &ensureApp();
+    freeink::ui::InputSnapshot noInput{};
+    freeink::ui::ActionEvent event = app->render(noInput);
+    (void)event;
+    freeink::ui::present(display, app->lastRenderRefreshHint());
+
+    goToSleep(nextWakeIntervalSeconds());  // noreturn
   }
 
-  static freeink::ui::DisplayTarget displayTarget(display.getFrameBuffer(), display.getDisplayWidth(),
-                                                  display.getDisplayHeight(), display.getDisplayWidthBytes());
-  static ui::App appInstance(displayTarget, displayTarget.deviceContext());
-  app = &appInstance;
-  // Deliberately no app->setClearColor(...) — the reader screen relies on
-  // frames NOT being auto-cleared so its raw framebuffer page write
-  // persists under the footer chrome drawn on top of it. See
-  // ui/InboxUI.h's header comment.
-  ui::initApp(*app, uiState);
+  app = &ensureApp();
 
   // Power-button / USB / cold-boot wake: sync once at boot (bounded by
   // SyncClient's own HTTP timeouts, never blocks indefinitely) so the
@@ -200,6 +264,6 @@ void loop() {
   }
 
   if (millis() - lastActivityMs > kIdleSleepTimeoutMs) {
-    goToSleep();  // noreturn
+    goToSleep(nextWakeIntervalSeconds());  // noreturn
   }
 }

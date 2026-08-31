@@ -99,6 +99,32 @@ timezone-model comment) — only the *display* and *device-local* dates
 (all-day events, TZID-less times) are UTC. A local-timezone Settings
 option is a reasonable follow-up, not implemented yet.
 
+#### Wake reminders
+
+With at least one calendar configured, the Settings screen's **Calendar**
+tab (gear/Settings button on the Inbox screen → Tab through to Calendar)
+offers two independent, off-by-default reminders for the next upcoming
+event, built on the same background timer wake the device already uses
+for hourly sync (`firmware/src/calendar/WakeSchedule.h`) — no separate
+radio window, no extra battery drain beyond a normal sync-and-sleep wake:
+
+- **Wake before start** + **Lead time** (5/10/15/30/60 minutes, cycled by
+  selecting the row): wakes and shows a reminder that many minutes before
+  the next event begins.
+- **Wake at event end**: wakes and shows a reminder right when it ends.
+
+Either can be on, both, or neither. When one is due, the device wakes on
+its own timer, refreshes the screen with a one-line reminder (event title
++ time), and goes straight back to sleep — the e-paper panel holds that
+image with no power until the next wake redraws it, so there's nothing
+further to do or dismiss. Each threshold fires at most once per event
+(tracked in `/system/calendar_cache.json`, survives the sleep cycle); if
+the next event changes before a reminder fires, the new event's own
+threshold is used instead. Between wakes with nothing due, the background
+timer interval shortens automatically to land on the nearer of the normal
+hourly sync or the next unfired reminder target, rather than always
+waiting the full hour.
+
 Insert the card into the X4.
 
 ## 3. First boot
@@ -144,9 +170,12 @@ expected until you've paired the device and printed something.
 The device sleeps automatically after ~90 seconds of no button presses
 (`kIdleSleepTimeoutMs` in `firmware/src/main.cpp`), and separately wakes on
 its own every hour to sync silently and go straight back to sleep without
-ever lighting the screen — see `docs/architecture.md`'s wake sequence.
-Both intervals are compile-time constants; adjust and reflash if you want a
-different cadence.
+ever lighting the screen — see `docs/architecture.md`'s wake sequence. If
+a calendar wake reminder (see "Wake reminders" above) is due sooner than
+the next hourly sync, the device wakes for that instead, shows the
+reminder, and re-arms the timer for whichever comes next. Both the idle
+timeout and the base hourly interval are compile-time constants; adjust
+and reflash if you want a different cadence.
 
 ## 5. Using the Web UI
 

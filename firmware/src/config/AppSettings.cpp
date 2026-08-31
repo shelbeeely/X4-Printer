@@ -23,11 +23,17 @@ void AppSettings::load() {
   if (deserializeJson(doc, raw)) return;  // malformed -- keep defaults, same as DeviceConfig/WifiStore
 
   data_.defaultLandscapeView = doc["default_landscape_view"] | false;
+  data_.calendarWakeBeforeStart = doc["calendar_wake_before_start"] | false;
+  data_.calendarWakeLeadMinutes = doc["calendar_wake_lead_minutes"] | 10;
+  data_.calendarWakeAtEnd = doc["calendar_wake_at_end"] | false;
 }
 
 bool AppSettings::save() const {
   JsonDocument doc;
   doc["default_landscape_view"] = data_.defaultLandscapeView;
+  doc["calendar_wake_before_start"] = data_.calendarWakeBeforeStart;
+  doc["calendar_wake_lead_minutes"] = data_.calendarWakeLeadMinutes;
+  doc["calendar_wake_at_end"] = data_.calendarWakeAtEnd;
 
   String out;
   serializeJson(doc, out);
