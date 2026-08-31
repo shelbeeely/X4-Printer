@@ -23,6 +23,7 @@
 
 #include <FreeInkApp.h>
 
+#include "config/AppSettings.h"
 #include "config/DeviceConfig.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
@@ -45,12 +46,33 @@ enum class ScreenMode {
   Status,    // last sync result / pairing status
   WebUiChoice,  // "Use Wi-Fi" / "Use Hotspot" / "Cancel" — entry point for the on-device web UI
   WebUi,        // web UI is running: shows connection info + PIN + Stop
+  Settings,     // tabbed settings — see SettingsTab
+};
+
+// One tab per settings group, matching the "tabbed groups" convention the
+// FreeInk SDK's other apps use for on-device settings (WakeInk's
+// Alarm/Sound/Filter/Clock/System tabs, sticky-reminders' Wi-Fi & clock
+// group) — switched with the Prev/Next footer actions, not a touch tab bar
+// the X4 has no hardware for.
+enum class SettingsTab : uint8_t {
+  Wifi = 0,       // saved networks: view + remove (adding a network needs
+                   // text entry this device has no keyboard for — done from
+                   // the on-device Web UI instead, see WebUiServer.h)
+  SyncRelay = 1,  // pairing/relay info -- read-only, provisioned by
+                  // pi-server/tools/pair_device.py, not editable on-device
+  Display = 2,    // default reading view (portrait/landscape)
+  DeviceInfo = 3,  // firmware version, battery, storage, uptime -- read-only
+  kCount = 4,
 };
 
 struct InboxUiState {
   store::JobIndex* jobs = nullptr;
   store::ApprovalOutboxIndex* outbox = nullptr;
   const config::DeviceConfigData* deviceConfig = nullptr;
+  // Not const: the Settings screen's Display tab writes through this
+  // (config::AppSettings::instance().data(), wired by main.cpp) and saves
+  // via config::AppSettings::instance().save() on change.
+  config::AppSettingsData* appSettings = nullptr;
 
   // On-device web UI (ui/WebUiServer.h) — see docs/architecture.md
   // "On-device Web UI". A plain member (not a pointer): its own
@@ -76,6 +98,14 @@ struct InboxUiState {
 
   syncmgr::SyncSummary lastSyncSummary;
   bool hasSyncedOnce = false;
+
+  // Settings screen (ScreenMode::Settings) navigation state -- which tab is
+  // showing and which Wi-Fi network row (if any) is pending a remove
+  // confirmation. Persists across renders the same way selectedJobIndex
+  // does, so re-entering Settings picks up where the user left it within
+  // one wake window (not saved anywhere; resets to Wifi/-1 next boot).
+  SettingsTab settingsTab = SettingsTab::Wifi;
+  int16_t settingsWifiRemoveIndex = -1;
 
   // Set by main.cpp before each app.render() call so screen functions can
   // reach the raw framebuffer for the reader's direct page write.

@@ -19,6 +19,7 @@
 #include <PowerManager.h>
 #include <SDCardManager.h>
 
+#include "config/AppSettings.h"
 #include "config/DeviceConfig.h"
 #include "config/WifiStore.h"
 #include "power/SleepManager.h"
@@ -50,6 +51,7 @@ ui::App* app = nullptr;
 store::JobIndex jobIndex;
 store::ApprovalOutboxIndex outboxIndex;
 config::DeviceConfigData deviceConfig;
+config::AppSettingsData appSettings;
 
 uint32_t lastActivityMs = 0;
 
@@ -109,6 +111,8 @@ void setup() {
   config::DeviceConfig::instance().load();
   deviceConfig = config::DeviceConfig::instance().data();
   config::WifiStore::instance().load();
+  config::AppSettings::instance().load();
+  appSettings = config::AppSettings::instance().data();
 
   store::loadJobIndex(jobIndex);
   store::loadApprovalOutbox(outboxIndex);
@@ -116,6 +120,7 @@ void setup() {
   uiState.jobs = &jobIndex;
   uiState.outbox = &outboxIndex;
   uiState.deviceConfig = &deviceConfig;
+  uiState.appSettings = &appSettings;
   uiState.framebuffer = display.getFrameBuffer();
   uiState.framebufferSize = display.getBufferSize();
   uiState.panelWidth = display.getDisplayWidth();

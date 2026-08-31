@@ -1,11 +1,15 @@
 #include "ui/InboxUI.h"
 
 #include <ArduinoJson.h>  // pulled transitively by other headers; kept explicit for clarity
+#include <BatteryMonitor.h>
+#include <SDCardManager.h>
 #include <time.h>
 
 #include <cstdio>
 #include <cstring>
 
+#include "config/Version.h"
+#include "config/WifiStore.h"
 #include "store/AtomicJsonFile.h"
 #include "util/Random.h"
 
@@ -26,6 +30,14 @@ enum : freeink::ui::ActionId {
   ActionWebUiChoiceRowSelect = 10,
   ActionWebUiStop = 11,
   ActionCancelWebUiChoice = 12,
+  ActionOpenSettings = 13,
+  ActionSettingsBack = 14,
+  ActionSettingsPrevTab = 15,
+  ActionSettingsNextTab = 16,
+  ActionSettingsWifiRowSelect = 17,
+  ActionSettingsWifiConfirmRemove = 18,
+  ActionSettingsWifiCancelRemove = 19,
+  ActionSettingsDisplayRowSelect = 20,
 };
 
 const char* statusGlyph(store::JobStatus status) {
@@ -91,8 +103,9 @@ void homeScreen(App::ScreenType& screen, void* userPtr) {
       {.label = "Open", .action = ActionOpenJob},
       {.label = "Sync Now", .action = ActionSyncNow},
       {.label = "Web UI", .action = ActionOpenWebUiChoice},
+      {.label = "Settings", .action = ActionOpenSettings},
   };
-  screen.footer(footer, 3);
+  screen.footer(footer, 4);
 
   if (count == 0) {
     screen.popup("Inbox empty. Print something from any computer on your network, then wake this device.");
@@ -230,6 +243,144 @@ void readerScreen(App::ScreenType& screen, void* userPtr) {
   screen.footer(footer, 4);
 }
 
+const char* settingsTabName(SettingsTab tab) {
+  switch (tab) {
+    case SettingsTab::Wifi:
+      return "Wi-Fi";
+    case SettingsTab::SyncRelay:
+      return "Sync & Relay";
+    case SettingsTab::Display:
+      return "Display";
+    case SettingsTab::DeviceInfo:
+      return "Device Info";
+    default:
+      return "";
+  }
+}
+
+// Saved networks: view + remove only. Adding one needs typed SSID/password
+// entry this device has no keyboard for -- see WebUiServer.h's on-device
+// web UI, which is where that belongs instead (a phone's own keyboard).
+void settingsWifiTab(App::ScreenType& screen, InboxUiState& state) {
+  config::WifiStore& store = config::WifiStore::instance();
+
+  if (store.count() == 0) {
+    screen.popup("No saved Wi-Fi networks. Add one from the on-device Web UI (Inbox screen).");
+    return;
+  }
+
+  static freeink::ui::ListItem items[config::kMaxWifiNetworks];
+  static char labels[config::kMaxWifiNetworks][config::kMaxSsidLen + 1];
+  size_t count = store.count();
+  for (size_t i = 0; i < count; i++) {
+    const config::WifiCredential& cred = store.at(i);
+    std::snprintf(labels[i], sizeof(labels[i]), "%s", cred.ssid);
+    items[i] = freeink::ui::ListItem{};
+    items[i].label = labels[i];
+    items[i].subtitle = std::strcmp(store.lastConnectedSsid(), cred.ssid) == 0 ? "Last connected" : nullptr;
+    items[i].actionValue = static_cast<int32_t>(i);
+  }
+
+  static int16_t selected = 0;
+  if (selected >= static_cast<int16_t>(count)) selected = 0;
+  screen.list(items, count, selected, ActionSettingsWifiRowSelect);
+
+  if (state.settingsWifiRemoveIndex >= 0 && state.settingsWifiRemoveIndex < static_cast<int16_t>(count)) {
+    const config::WifiCredential& target = store.at(static_cast<size_t>(state.settingsWifiRemoveIndex));
+    freeink::ui::OptionDialogProps dialog;
+    dialog.title = "Remove network?";
+    dialog.headline = target.ssid;
+    static const freeink::ui::DialogOption options[] = {
+        {.label = "Remove", .action = ActionSettingsWifiConfirmRemove},
+        {.label = "Cancel", .action = ActionSettingsWifiCancelRemove},
+    };
+    dialog.options = options;
+    dialog.optionCount = 2;
+    screen.dialog(dialog);
+  }
+}
+
+// Read-only: everything here is either provisioned by
+// pi-server/tools/pair_device.py (device id/name, Pi/relay URLs) or a
+// result of the last sync pass -- nothing on this tab is editable
+// on-device, matching how config.py's own RUNTIME_OVERRIDABLE_FIELDS
+// draws the same "what's live-editable" line on the Pi side.
+void settingsSyncRelayTab(App::ScreenType& screen, InboxUiState& state) {
+  char body[320];
+  const config::DeviceConfigData* cfg = state.deviceConfig;
+  if (cfg == nullptr || !cfg->loaded) {
+    screen.popup("Not paired yet. See docs/setup-x4.md.");
+    return;
+  }
+
+  int written = std::snprintf(body, sizeof(body), "Device: %s\nPaired to: %s\nRelay: %s",
+                               cfg->deviceName[0] ? cfg->deviceName : cfg->deviceId, cfg->piBaseUrl,
+                               cfg->hasRelay ? cfg->relayBaseUrl : "not configured");
+  if (state.hasSyncedOnce && written > 0 && static_cast<size_t>(written) < sizeof(body)) {
+    std::snprintf(body + written, sizeof(body) - static_cast<size_t>(written),
+                  "\nLast sync: %d new, %d approval(s) synced%s", state.lastSyncSummary.newJobsDownloaded,
+                  state.lastSyncSummary.approvalsSynced, state.lastSyncSummary.usedRelay ? " (via relay)" : "");
+  }
+  screen.popup(body);
+}
+
+void settingsDisplayTab(App::ScreenType& screen, InboxUiState& state) {
+  freeink::ui::ListItem item{};
+  item.label = "Default view";
+  item.toggle = true;
+  item.toggleChecked = state.appSettings != nullptr && state.appSettings->defaultLandscapeView;
+  item.actionValue = 0;
+  screen.list(&item, 1, 0, ActionSettingsDisplayRowSelect);
+}
+
+void settingsDeviceInfoTab(App::ScreenType& screen) {
+  BatteryMonitor::Status battery = BatteryMonitor().readStatus();
+  uint64_t sdTotal = SdMan.sdTotalBytes();
+  uint64_t sdUsed = SdMan.sdUsedBytes();
+
+  char batteryStr[16];
+  if (battery.percentageKnown) {
+    std::snprintf(batteryStr, sizeof(batteryStr), "%u%%", static_cast<unsigned>(battery.percentage));
+  } else {
+    std::snprintf(batteryStr, sizeof(batteryStr), "unknown");
+  }
+
+  char body[256];
+  std::snprintf(body, sizeof(body), "Firmware: %s\nBattery: %s\nStorage: %llu / %llu MB used",
+                config::kFirmwareVersion, batteryStr, static_cast<unsigned long long>(sdUsed / (1024 * 1024)),
+                static_cast<unsigned long long>(sdTotal / (1024 * 1024)));
+  screen.popup(body);
+}
+
+void settingsScreen(App::ScreenType& screen, void* userPtr) {
+  auto& state = *static_cast<InboxUiState*>(userPtr);
+
+  screen.header("Settings", settingsTabName(state.settingsTab));
+
+  switch (state.settingsTab) {
+    case SettingsTab::Wifi:
+      settingsWifiTab(screen, state);
+      break;
+    case SettingsTab::SyncRelay:
+      settingsSyncRelayTab(screen, state);
+      break;
+    case SettingsTab::Display:
+      settingsDisplayTab(screen, state);
+      break;
+    case SettingsTab::DeviceInfo:
+    default:
+      settingsDeviceInfoTab(screen);
+      break;
+  }
+
+  const freeink::ui::FooterAction footer[] = {
+      {.label = "< Tab", .action = ActionSettingsPrevTab},
+      {.label = "Tab >", .action = ActionSettingsNextTab},
+      {.label = "Back", .action = ActionSettingsBack},
+  };
+  screen.footer(footer, 3);
+}
+
 void screenRouter(App::ScreenType& screen, void* userPtr) {
   auto& state = *static_cast<InboxUiState*>(userPtr);
   switch (state.mode) {
@@ -244,6 +395,9 @@ void screenRouter(App::ScreenType& screen, void* userPtr) {
       return;
     case ScreenMode::WebUi:
       webUiScreen(screen, userPtr);
+      return;
+    case ScreenMode::Settings:
+      settingsScreen(screen, userPtr);
       return;
     case ScreenMode::Inbox:
     case ScreenMode::Status:
@@ -298,7 +452,10 @@ void initApp(App& app, InboxUiState& state) {
         auto& s = *static_cast<InboxUiState*>(userPtr);
         s.selectedJobIndex = event.value;
         s.readerOpenForSelected = false;
-        s.landscapeView = false;
+        // Falls back to portrait regardless of this default when the job has
+        // no landscape variant -- readerScreen() only honors landscapeView
+        // once it's confirmed job.landscapeXtcPath is non-empty.
+        s.landscapeView = s.appSettings != nullptr && s.appSettings->defaultLandscapeView;
         s.mode = ScreenMode::Reader;
       },
       &state);
@@ -426,6 +583,89 @@ void initApp(App& app, InboxUiState& state) {
       ActionCancelWebUiChoice,
       [](const freeink::ui::ActionEvent&, void* userPtr) {
         static_cast<InboxUiState*>(userPtr)->mode = ScreenMode::Inbox;
+      },
+      &state);
+
+  app.on(
+      ActionOpenSettings,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        s.settingsWifiRemoveIndex = -1;  // dismiss any stale confirm from a previous visit
+        s.mode = ScreenMode::Settings;
+      },
+      &state);
+
+  app.on(
+      ActionSettingsBack,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        s.settingsWifiRemoveIndex = -1;
+        s.mode = ScreenMode::Inbox;
+      },
+      &state);
+
+  app.on(
+      ActionSettingsPrevTab,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        s.settingsWifiRemoveIndex = -1;
+        uint8_t count = static_cast<uint8_t>(SettingsTab::kCount);
+        uint8_t current = static_cast<uint8_t>(s.settingsTab);
+        s.settingsTab = static_cast<SettingsTab>((current + count - 1) % count);
+      },
+      &state);
+
+  app.on(
+      ActionSettingsNextTab,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        s.settingsWifiRemoveIndex = -1;
+        uint8_t count = static_cast<uint8_t>(SettingsTab::kCount);
+        uint8_t current = static_cast<uint8_t>(s.settingsTab);
+        s.settingsTab = static_cast<SettingsTab>((current + 1) % count);
+      },
+      &state);
+
+  app.on(
+      ActionSettingsWifiRowSelect,
+      [](const freeink::ui::ActionEvent& event, void* userPtr) {
+        static_cast<InboxUiState*>(userPtr)->settingsWifiRemoveIndex = static_cast<int16_t>(event.value);
+      },
+      &state);
+
+  app.on(
+      ActionSettingsWifiConfirmRemove,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        config::WifiStore& store = config::WifiStore::instance();
+        if (s.settingsWifiRemoveIndex >= 0 && s.settingsWifiRemoveIndex < static_cast<int16_t>(store.count())) {
+          // Copy the ssid first: remove() swaps the last entry into this
+          // slot (see WifiStore::remove), so reading store.at(index) after
+          // calling it would read the wrong network.
+          char ssid[config::kMaxSsidLen + 1];
+          std::snprintf(ssid, sizeof(ssid), "%s", store.at(static_cast<size_t>(s.settingsWifiRemoveIndex)).ssid);
+          store.remove(ssid);
+          store.save();
+        }
+        s.settingsWifiRemoveIndex = -1;
+      },
+      &state);
+
+  app.on(
+      ActionSettingsWifiCancelRemove,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        static_cast<InboxUiState*>(userPtr)->settingsWifiRemoveIndex = -1;
+      },
+      &state);
+
+  app.on(
+      ActionSettingsDisplayRowSelect,
+      [](const freeink::ui::ActionEvent&, void* userPtr) {
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        if (s.appSettings == nullptr) return;
+        s.appSettings->defaultLandscapeView = !s.appSettings->defaultLandscapeView;
+        config::AppSettings::instance().setDefaultLandscapeView(s.appSettings->defaultLandscapeView);
+        config::AppSettings::instance().save();
       },
       &state);
 }

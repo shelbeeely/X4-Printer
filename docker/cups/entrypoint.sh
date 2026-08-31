@@ -74,10 +74,17 @@ fi
 
 # Belt-and-braces: whichever path created it, make sure it's enabled and
 # accepting jobs (a fresh dpkg install can leave a queue disabled/rejecting
-# until explicitly told otherwise).
+# until explicitly told otherwise). printer-is-shared=true is the one that
+# actually matters for this container's whole purpose: CUPS defaults new
+# queues to unshared, which is invisible-but-not-an-error to a REMOTE
+# client -- `lp -h cups -d PDF` from the pi-server container gets exactly
+# "the printer or class does not exist" for an unshared queue, even though
+# the exact same queue works fine for every LOCAL command in this loop
+# (which is why this got past every check above and only showed up once
+# the pi-server container tried to actually use it).
 cupsaccept -h localhost:631 PDF 2>/dev/null || true
 cupsenable -h localhost:631 PDF 2>/dev/null || true
-lpadmin -h localhost:631 -p PDF -E
+lpadmin -h localhost:631 -p PDF -E -o printer-is-shared=true
 
 echo "entrypoint.sh: PDF queue ready:"
 lpstat -h localhost:631 -p PDF
