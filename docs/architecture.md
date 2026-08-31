@@ -393,6 +393,33 @@ gating:
   empty) on any network error, non-2xx status, or CORS failure — same
   "worst case is nothing shown" rule as the thumbnails.
 
+### On-device diagnostics panel
+
+The job-list page also has a collapsible diagnostics panel (`GET
+/api/diag`, `WebUiServer::handleApiDiag()`) showing storage, battery, and
+memory state — read-only, no new trust boundary (same session-cookie gate
+as every other Web UI route). Every field follows the same "omit rather
+than show a wrong or misleading value" rule used everywhere else in this
+feature:
+
+- **Storage.** `sd_total_bytes`/`sd_free_bytes` from `SDCardManager`'s
+  `sdTotalBytes()`/`sdUsedBytes()` (subtracted here; clamped to 0 rather
+  than underflowing if used ever exceeds total).
+- **Battery.** `BatteryMonitor::readStatus()` (FreeInk SDK) reports
+  `battery_percent`/`battery_millivolts`, each included only when that
+  reading's own `percentageKnown`/`millivoltsKnown` flag is true.
+  Charging status is deliberately never surfaced: X4's `BoardConfig`
+  profile has no charge-status pin wired (`batteryChargeStatus =
+  PIN_UNASSIGNED`), so `chargingKnown` would always read false — showing
+  it would look like "definitely not charging" instead of "unknown."
+- **Memory.** `heap_free_bytes` from `freeink::MemoryManager::instance().freeBytes()`
+  — always present (no hardware-dependent unknown case here).
+
+`joblist.html` hides each row individually when its backing field is
+absent from the response, rather than showing a placeholder — a device
+built without `BatteryMonitor` wired up, for instance, just shows Storage
+and Free memory with no Battery row, not a broken or zeroed one.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,

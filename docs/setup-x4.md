@@ -88,7 +88,14 @@ expected until you've paired the device and printed something.
   enqueues an approval (`firmware/src/store/ApprovalOutbox.*`) *before* any
   network attempt — this is the "approval is saved locally" step from the
   task's critical workflow, and it survives a reboot or dead battery
-  between now and the next sync.
+  between now and the next sync. A job the Pi rendered a landscape-strip
+  variant for (see `docs/architecture.md` "Landscape-strip reading mode")
+  also gets a **View: Landscape / View: Portrait** row that swaps which
+  rendering the reader screen shows — turn the device 90° for the
+  landscape one, which uses the panel's full 800px dimension as reading
+  length instead of being bound by the shorter 480px one. The choice
+  resets to Portrait every time you open a document fresh from the Inbox
+  screen.
 - **Sync Now** (Inbox footer): triggers an immediate sync pass without
   waiting for the idle-sleep timer. Useful right after you know you've sent
   a print job and want it to show up now.
@@ -135,6 +142,11 @@ HTTP, and shuts itself off on the same idle timer as everything else).
 4. **Stop** (footer button on the Web UI screen) ends the session
    immediately; otherwise it ends on its own after ~90 seconds of no
    activity from the phone, same idle timer as the rest of the UI.
+5. The job-list page has a collapsible **diagnostics** panel: SD card
+   free/total space, battery percentage (if this build has `BatteryMonitor`
+   readings available), and free heap — see `docs/architecture.md`
+   "On-device diagnostics panel" for exactly what each field means and why
+   some rows can be absent on a given device.
 
 ## 6. Remote approval away from home
 
