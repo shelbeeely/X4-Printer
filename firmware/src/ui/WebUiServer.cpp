@@ -2,6 +2,8 @@
 
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <BatteryMonitor.h>
+#include <MemoryManager.h>
 #include <SDCardManager.h>
 #include <SdFat.h>
 #include <WiFi.h>
@@ -305,6 +307,24 @@ void WebUiServer::handleApiDiag() {
   doc["panel_width"] = panelWidth_;
   doc["panel_height"] = panelHeight_;
   doc["uptime_seconds"] = (millis() - wakeMillis_) / 1000;
+  // sdUsedBytes() scans the FAT and is cached with a 20s TTL by SDCardManager
+  // itself (see SDCardManager.h) -- cheap enough to call on every lazy diag
+  // fetch without adding our own caching layer on top.
+  const uint64_t sdTotal = SdMan.sdTotalBytes();
+  const uint64_t sdUsed = SdMan.sdUsedBytes();
+  doc["sd_total_bytes"] = sdTotal;
+  doc["sd_free_bytes"] = sdTotal >= sdUsed ? sdTotal - sdUsed : 0;
+
+  // X4 is an ADC-backed board (BoardConfig::XTEINK_X4 has no charge-status
+  // pin), so percentage/millivolts are the only fields this hardware can
+  // report -- chargingKnown/externalPowerKnown always come back false here,
+  // not a bug in this call. Omit rather than send a misleading always-false
+  // charging flag.
+  const BatteryMonitor::Status battery = BatteryMonitor().readStatus();
+  if (battery.percentageKnown) doc["battery_percent"] = battery.percentage;
+  if (battery.millivoltsKnown) doc["battery_millivolts"] = battery.millivolts;
+
+  doc["heap_free_bytes"] = freeink::MemoryManager::instance().freeBytes();
 
   String out;
   serializeJson(doc, out);

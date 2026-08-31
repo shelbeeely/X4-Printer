@@ -13,12 +13,21 @@ All multi-byte fields are little-endian, matching the spec.
 
 from __future__ import annotations
 
+import math
 import struct
 import time
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from PIL import Image
+
+
+class ConversionError(Exception):
+    """Raised by this module's own strip-layout guard
+    (``prepare_landscape_strip_images``'s ``max_strips`` check) and
+    re-exported from ``convert.py`` (which defines the rest of this
+    hierarchy) so every caller keeps importing one ``ConversionError`` from
+    one place regardless of which module actually raised it."""
 
 MAGIC_XTG = 0x00475458
 MAGIC_XTC = 0x00435458
@@ -173,6 +182,62 @@ def prepare_page_image(image: Image.Image, target_width: int, target_height: int
     # Floyd-Steinberg dithering (PIL's default for convert("1")) gives much
     # better print-document legibility than a hard threshold.
     return canvas.convert("1")
+
+
+def prepare_landscape_strip_images(
+    image: Image.Image, panel_width: int, panel_height: int, *, max_strips: int = 20
+) -> list[Image.Image]:
+    """Splits one source page into panel_width x panel_height strips, each
+    pre-rotated 90 degrees so XtcReader's fast raw-copy path (exact
+    panel-size match, see firmware/src/xtc/XtcReader.cpp) needs no
+    on-device rotation or scaling. Renders at a scale where the page's
+    width maps to panel_height -- the axis that becomes the reading width
+    once the device is physically turned sideways -- so the panel's full
+    panel_width becomes available per strip as reading length, instead of
+    prepare_page_image's fit-to-panel mode, which is bound by the panel's
+    shorter panel_height dimension for a typical portrait page.
+
+    Rotation direction (ROTATE_270) is a best-guess convention, not
+    verified against real hardware -- there is no way to confirm which
+    physical edge holds the buttons once the device is turned sideways
+    without an actual unit. Isolated to this one call so it's a one-line
+    fix if wrong.
+    """
+    img = image.convert("L")
+    src_w, src_h = img.size
+    scale = panel_height / src_w
+    new_w = max(1, round(src_w * scale))
+    new_h = max(1, round(src_h * scale))
+
+    # Check the strip-count cap BEFORE resizing, not after: for a
+    # pathological aspect ratio, new_h can be large enough that PIL's own
+    # decompression-bomb guard raises on the resize() call itself (not a
+    # ConversionError) before we'd ever get to this check -- and an
+    # uncaught exception here would abort the whole job ingest, not just
+    # skip the landscape variant (see ipp_server.py's narrow `except
+    # ConversionError`).
+    strip_count = max(1, math.ceil(new_h / panel_width))
+    if strip_count > max_strips:
+        raise ConversionError(
+            f"page shape needs {strip_count} landscape strips, exceeding the maximum supported ({max_strips})"
+        )
+
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    canvas = Image.new("L", (panel_height, strip_count * panel_width), 255)
+    paste_x = (panel_height - new_w) // 2
+    canvas.paste(resized, (paste_x, 0))
+
+    # Dither the whole padded strip once, before slicing -- avoids visible
+    # seams at strip boundaries that independently dithering each chunk
+    # would introduce.
+    dithered = canvas.convert("1")
+
+    strips = []
+    for i in range(strip_count):
+        chunk = dithered.crop((0, i * panel_width, panel_height, (i + 1) * panel_width))
+        strips.append(chunk.transpose(Image.ROTATE_270))
+    return strips
 
 
 def iter_prepared_pages(

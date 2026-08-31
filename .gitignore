@@ -8,7 +8,7 @@ __pycache__/
 # PlatformIO
 firmware/.pio/
 firmware/.cache/
-firmware/freeink-sdk/
+# firmware/freeink-sdk is a git submodule (tracked on purpose) — see .gitmodules
 
 # C++ host test build
 firmware/test/build/
@@ -28,5 +28,9 @@ kitchen-x4.json
 .DS_Store
 *.swp
 
-# Claude Code session state (agent worktrees, etc.)
-.claude/
+# Claude Code session state (agent worktrees, etc.) -- but keep the repo's
+# own committed settings/hooks (.claude/settings.json, .claude/hooks/)
+.claude/worktrees/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/

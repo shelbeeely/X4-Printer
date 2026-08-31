@@ -6,7 +6,7 @@
 
 #include "net/WifiManager.h"
 
-namespace sync {
+namespace syncmgr {
 
 namespace {
 constexpr size_t kSyncBatchSize = 16;
@@ -65,7 +65,24 @@ void SyncManager::downloadPendingJobs(net::SyncClient& client, SyncSummary& summ
       continue;  // stays pending on the server, retried next wake
     }
 
-    if (!client.ackJob(m.jobId, m.xtcSha256)) {
+    // Landscape-strip variant (docs/protocol.md §1.1/§4) -- optional, only
+    // present in the manifest when the Pi actually produced one for this
+    // job. All-or-nothing with the normal download above: a job only ever
+    // becomes visible on-device once every variant the manifest advertised
+    // is fully downloaded and verified, so a JobEntry never claims a
+    // landscape variant that isn't really on SD.
+    bool hasLandscape = m.landscapeXtcSha256[0] != '\0';
+    String landscapeDestPath = String("/inbox/") + m.jobId + "_l.xtc";
+    if (hasLandscape) {
+      bool landscapeOk = client.downloadJobToSd(m.jobId, landscapeDestPath.c_str(), m.landscapeXtcSha256,
+                                                 m.landscapeXtcBytes, "landscape");
+      if (!landscapeOk) {
+        summary.jobsFailedVerification++;
+        continue;
+      }
+    }
+
+    if (!client.ackJob(m.jobId, m.xtcSha256, hasLandscape ? m.landscapeXtcSha256 : nullptr)) {
       // Downloaded and verified locally but the ack didn't make it to the
       // Pi — the Pi will offer it again next wake (it's still "pending"
       // there), and our own downloadJobToSd() overwrite-on-verify is
@@ -84,6 +101,12 @@ void SyncManager::downloadPendingJobs(net::SyncClient& client, SyncSummary& summ
     entry.pageCount = m.pageCount;
     entry.createdAt = m.createdAt;
     entry.status = store::JobStatus::Downloaded;
+    if (hasLandscape) {
+      std::strncpy(entry.landscapeXtcPath, landscapeDestPath.c_str(), sizeof(entry.landscapeXtcPath) - 1);
+      entry.landscapeXtcBytes = m.landscapeXtcBytes;
+      std::strncpy(entry.landscapeXtcSha256, m.landscapeXtcSha256, sizeof(entry.landscapeXtcSha256) - 1);
+      entry.landscapePageCount = m.landscapePageCount;
+    }
 
     if (jobs_.upsert(entry)) {
       summary.newJobsDownloaded++;
@@ -126,4 +149,4 @@ void SyncManager::drainApprovalOutbox(net::SyncClient& client, SyncSummary& summ
   }
 }
 
-}  // namespace sync
+}  // namespace syncmgr

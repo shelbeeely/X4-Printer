@@ -25,6 +25,17 @@ cd firmware/test && cmake -B build && cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+If you touched anything under `firmware/src/` beyond the pure-logic
+modules the host tests cover, also do a real device build before opening a
+PR — the host suite doesn't compile against Arduino/ESP-IDF at all, so it
+can't catch things like a symbol colliding with an ESP-IDF/newlib global or
+a missing include that an implicit transitive one happened to cover:
+
+```sh
+git submodule update --init firmware/freeink-sdk   # first time only
+cd firmware && pio run -e xteink_x4
+```
+
 For a real X4/Pi setup (not just tests), see `docs/setup-pi.md` and
 `docs/setup-x4.md`.
 

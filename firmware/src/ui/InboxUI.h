@@ -68,8 +68,13 @@ struct InboxUiState {
 
   xtc::XtcReader reader;
   bool readerOpenForSelected = false;
+  // True while showing the landscape-strip variant (docs/protocol.md §4)
+  // instead of the normal portrait-fit one. Reset to false whenever a new
+  // document is opened (ActionOpenJob) -- every fresh open defaults to the
+  // normal view.
+  bool landscapeView = false;
 
-  sync::SyncSummary lastSyncSummary;
+  syncmgr::SyncSummary lastSyncSummary;
   bool hasSyncedOnce = false;
 
   // Set by main.cpp before each app.render() call so screen functions can

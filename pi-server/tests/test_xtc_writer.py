@@ -1,12 +1,16 @@
+import math
 import struct
 
+import pytest
 from PIL import Image
 
 from xteink_print_server.xtc_writer import (
     XTC_HEADER_SIZE,
+    ConversionError,
     XtcMetadata,
     encode_xtc,
     encode_xtg_page,
+    prepare_landscape_strip_images,
     prepare_page_image,
 )
 
@@ -75,3 +79,33 @@ def test_encode_xtg_page_rejects_non_mode_1():
 
     with pytest.raises(ValueError):
         encode_xtg_page(Image.new("L", (10, 10)))
+
+
+def test_prepare_landscape_strip_images_single_strip_for_normal_portrait_page():
+    # A typical portrait page (roughly US letter aspect) needs only one
+    # strip: width-mapped-to-panel_height scale keeps the rendered height
+    # under one panel_width-tall chunk.
+    src = Image.new("RGB", (850, 1100), "white")
+    strips = prepare_landscape_strip_images(src, 800, 480)
+    assert len(strips) == 1
+    for strip in strips:
+        assert strip.mode == "1"
+        assert strip.size == (800, 480)
+
+
+def test_prepare_landscape_strip_images_splits_tall_page_into_multiple_strips():
+    src = Image.new("RGB", (200, 6000), "white")
+    strips = prepare_landscape_strip_images(src, 800, 480)
+    scale = 480 / 200
+    expected_count = math.ceil(round(6000 * scale) / 800)
+    assert expected_count > 1  # sanity-check the test fixture actually exercises multi-strip
+    assert len(strips) == expected_count
+    for strip in strips:
+        assert strip.mode == "1"
+        assert strip.size == (800, 480)
+
+
+def test_prepare_landscape_strip_images_raises_past_max_strips():
+    src = Image.new("RGB", (200, 6000), "white")  # needs 18 strips at the default scale math
+    with pytest.raises(ConversionError):
+        prepare_landscape_strip_images(src, 800, 480, max_strips=5)

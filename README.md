@@ -62,8 +62,9 @@ one-time manual step).
 1. **Pi**: `cd pi-server && sudo ./install/install.sh` — see
    `docs/setup-pi.md` for the full walkthrough (configuring your physical
    printer in CUPS, pairing a device).
-2. **X4**: `cd firmware && pio run -e xteink_x4 -t upload` — see
-   `docs/setup-x4.md` for SD card provisioning and first boot.
+2. **X4**: `git submodule update --init firmware/freeink-sdk && cd firmware
+   && pio run -e xteink_x4 -t upload` — see `docs/setup-x4.md` for SD card
+   provisioning and first boot.
 3. **(Optional) Relay**, for approving prints away from home: `cd relay &&
    sudo ./install/install.sh` — see `docs/relay.md`.
 
@@ -113,6 +114,12 @@ All four suites are green in this repository as committed.
   from a button press or its own RTC timer, syncs, and goes back to sleep
   — a timer wake doesn't even light the screen if there's nothing to show
   a user who isn't there. See `docs/architecture.md`'s wake sequence.
+- **Reads sharper, sideways.** Every job also gets a landscape-strip
+  rendering split into panel-sized, pre-rotated pages — turn the device
+  90° for text that uses the panel's full 800px dimension as reading
+  length instead of the shorter 480px one. Toggle per-document from the
+  reader's action menu; no format or firmware-rendering change needed to
+  support it. See `docs/architecture.md` "Landscape-strip reading mode".
 - **The relay never needs your documents.** It carries device/job IDs,
   actions, and timestamps — never the original file or the XTC preview
   (opt-in exception documented in `docs/relay.md`), and neither the Pi nor

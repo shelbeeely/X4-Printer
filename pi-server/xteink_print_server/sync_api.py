@@ -92,7 +92,7 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         elif len(rest) == 3 and rest[0] == "devices" and rest[2] == "status":
             self._handle_status(rest[1])
         elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "xtc":
-            self._handle_download_xtc(rest[1])
+            self._handle_download_xtc(rest[1], parsed.query)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -134,8 +134,9 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         else:
             rows = self.db.list_pending_jobs_for_device(device_id)
 
-        jobs = [
-            {
+        jobs = []
+        for row in rows:
+            job = {
                 "job_id": row["job_id"],
                 "title": row["title"],
                 "created_at": row["created_at"],
@@ -144,11 +145,19 @@ class SyncApiHandler(BaseHTTPRequestHandler):
                 "page_count": row["page_count"],
                 "status": row["status"],
             }
-            for row in rows
-        ]
+            # Optional: present only when this job has a landscape-strip
+            # variant (see xtc_writer.prepare_landscape_strip_images) --
+            # absent, not a null/empty placeholder, for jobs converted
+            # before this feature existed or whose landscape rendering was
+            # skipped (ipp_server._ingest_document's best-effort fallback).
+            if row["xtc_landscape_sha256"]:
+                job["landscape_xtc_bytes"] = row["xtc_landscape_bytes"]
+                job["landscape_xtc_sha256"] = row["xtc_landscape_sha256"]
+                job["landscape_page_count"] = row["xtc_landscape_page_count"]
+            jobs.append(job)
         self._send_json(200, {"jobs": jobs, "server_time": int(time.time())})
 
-    def _handle_download_xtc(self, job_id: str) -> None:
+    def _handle_download_xtc(self, job_id: str, query: str = "") -> None:
         device_id = self._authenticate()
         if device_id is None:
             return
@@ -157,14 +166,27 @@ class SyncApiHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "job not found"})
             return
 
+        variant = (parse_qs(query).get("variant", ["normal"])[0] or "normal").strip()
+        if variant == "landscape":
+            path_col, bytes_col, sha_col = "xtc_landscape_path", "xtc_landscape_bytes", "xtc_landscape_sha256"
+        elif variant == "normal":
+            path_col, bytes_col, sha_col = "xtc_path", "xtc_bytes", "xtc_sha256"
+        else:
+            self._send_json(400, {"error": f"unknown variant {variant!r}"})
+            return
+
+        if not row[path_col]:
+            self._send_json(404, {"error": f"{variant} variant not available for this job"})
+            return
+
         from pathlib import Path
 
-        xtc_path = Path(row["xtc_path"])
+        xtc_path = Path(row[path_col])
         if not xtc_path.exists():
             self._send_json(410, {"error": "xtc file no longer available"})
             return
 
-        total_size = row["xtc_bytes"]
+        total_size = row[bytes_col]
         range_header = self.headers.get("Range")
         start, end = 0, total_size - 1
         status = 200
@@ -183,7 +205,7 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/x-xtc")
         self.send_header("Content-Length", str(length))
-        self.send_header("X-Content-SHA256", row["xtc_sha256"])
+        self.send_header("X-Content-SHA256", row[sha_col])
         self.send_header("Accept-Ranges", "bytes")
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
@@ -214,6 +236,15 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         if body.get("sha256") != row["xtc_sha256"]:
             self._send_json(409, {"status": "hash_mismatch"})
             return
+        # Optional: a device that also downloaded the landscape-strip
+        # variant includes its hash so one ack still covers the whole job.
+        # Only enforced when the job actually has a landscape variant --
+        # absent from the body just means "didn't check", not a mismatch.
+        landscape_sha256 = body.get("landscape_sha256")
+        if row["xtc_landscape_sha256"] and landscape_sha256 is not None:
+            if landscape_sha256 != row["xtc_landscape_sha256"]:
+                self._send_json(409, {"status": "hash_mismatch"})
+                return
         self.db.mark_delivered(job_id, device_id)
         self._send_json(200, {"status": "ok"})
 

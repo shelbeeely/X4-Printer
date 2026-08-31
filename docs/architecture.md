@@ -206,6 +206,66 @@ the *next* wake, keeping Wi-Fi off for the rest of the interactive session —
 woken" both hold: nothing above requires an inbound connection to the X4 at
 any point.
 
+## Landscape-strip reading mode
+
+The X4's panel is 800x480 (landscape), but most print jobs are portrait
+documents — fitting a whole portrait page into that box
+(`xtc_writer.prepare_page_image()`, the default `RenderMode.FIT_PAGE`) is
+bound by the panel's *shorter* 480px dimension, wasting most of the 800px
+width as unused margin. `xtc_writer.prepare_landscape_strip_images()`
+(`RenderMode.LANDSCAPE_STRIPS`) offers an alternative: render each source
+page at a scale where its width maps to the panel's 480px dimension, slice
+the result into consecutive panel-width-tall chunks, and pre-rotate each
+one 90 degrees — so reading it means physically turning the device
+sideways, but every strip uses the panel's full 800px dimension as reading
+length instead of being bound by the shorter one.
+
+This needed **no XTC/XTG format change** (the container already supports
+an arbitrary number of independently-sized pages, see
+`docs/xtc-format.md`) and **no firmware rendering change** (each strip is
+already exactly panel-sized and correctly oriented, so
+`XtcReader::renderPageToFramebuffer()`'s existing raw-copy fast path
+handles it — firmware never scales or rotates anything itself). The
+rotation direction (`Image.ROTATE_270` in `xtc_writer.py`) is a best-guess
+convention, not verified against real hardware — there is no IMU on the X4
+(BoardConfig's IMU capability is X3/Sticky-only) and no way to confirm
+which physical edge holds the buttons once the device is turned sideways
+without an actual unit; it's isolated to one call site for a trivial fix
+if wrong.
+
+`ipp_server.py`'s `_ingest_document()` **always attempts both renderings**
+for every job — the Pi generates a landscape-strip variant alongside the
+normal one, not on request. A landscape-conversion failure (e.g. a page
+shape needing more strips than `prepare_landscape_strip_images`'s
+`max_strips` guard allows) is logged and degrades to "no landscape variant
+for this job," same as a thumbnail-generation failure — it never blocks
+ingestion, since the normal rendering already succeeded. The second XTC
+file is tracked by four more `jobs` columns
+(`xtc_landscape_path`/`_bytes`/`_sha256`/`_page_count`, added via the same
+`_ensure_column()` migration pattern `thumbnail_path` established), empty
+path meaning "none" — the X4-side `JobStore` mirrors the same four fields
+on `JobEntry`.
+
+This doubles per-job Pi conversion time and X4 SD storage — an explicit,
+known tradeoff (the user's own choice over two other designs: a
+per-device default, or a second IPP printer queue) rather than an
+oversight. The wake sequence's steps 3-5 above extend accordingly: the
+job-listing manifest (`docs/protocol.md` §1.1) includes the landscape
+variant's hash/size/page-count only when one exists, `SyncManager`
+downloads and verifies it as a second file (`/inbox/<job_id>_l.xtc`)
+**all-or-nothing** with the normal one — a job only becomes visible
+on-device once every variant the manifest advertised is fully verified on
+SD — and a single `POST /jobs/{id}/ack` covers both hashes at once
+(§1.3), never a separate per-variant delivery state.
+
+On-device, the reader screen (`InboxUI.cpp`) defaults to the normal view
+for every freshly opened document; the action menu (opened via the page
+counter) gains a "View: Landscape"/"View: Portrait" toggle row, shown only
+for jobs that have a landscape variant, which reopens the same document
+from the other file and resets to its own page 1 — there's no attempt to
+map "roughly the same spot" between the two renderings, since they don't
+share a page correspondence.
+
 ## On-device Web UI (opt-in)
 
 Everything above holds for normal operation. `ui/WebUiServer.h`/`.cpp` adds
@@ -333,6 +393,33 @@ gating:
   empty) on any network error, non-2xx status, or CORS failure — same
   "worst case is nothing shown" rule as the thumbnails.
 
+### On-device diagnostics panel
+
+The job-list page also has a collapsible diagnostics panel (`GET
+/api/diag`, `WebUiServer::handleApiDiag()`) showing storage, battery, and
+memory state — read-only, no new trust boundary (same session-cookie gate
+as every other Web UI route). Every field follows the same "omit rather
+than show a wrong or misleading value" rule used everywhere else in this
+feature:
+
+- **Storage.** `sd_total_bytes`/`sd_free_bytes` from `SDCardManager`'s
+  `sdTotalBytes()`/`sdUsedBytes()` (subtracted here; clamped to 0 rather
+  than underflowing if used ever exceeds total).
+- **Battery.** `BatteryMonitor::readStatus()` (FreeInk SDK) reports
+  `battery_percent`/`battery_millivolts`, each included only when that
+  reading's own `percentageKnown`/`millivoltsKnown` flag is true.
+  Charging status is deliberately never surfaced: X4's `BoardConfig`
+  profile has no charge-status pin wired (`batteryChargeStatus =
+  PIN_UNASSIGNED`), so `chargingKnown` would always read false — showing
+  it would look like "definitely not charging" instead of "unknown."
+- **Memory.** `heap_free_bytes` from `freeink::MemoryManager::instance().freeBytes()`
+  — always present (no hardware-dependent unknown case here).
+
+`joblist.html` hides each row individually when its backing field is
+absent from the response, rather than showing a placeholder — a device
+built without `BatteryMonitor` wired up, for instance, just shows Storage
+and Free memory with no Battery row, not a broken or zeroed one.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,
@@ -343,7 +430,7 @@ the FreeInk display framebuffer, and application code. Concretely:
 | Display framebuffer | 48,000 B (800x480 / 8, single-buffer mode, `-DEINK_DISPLAY_SINGLE_BUFFER_MODE=1`) | Fixed, owned by FreeInk |
 | XTC page render | 2,048 B chunk buffer | `XtcReader` streams file→framebuffer in fixed chunks, §`docs/xtc-format.md` |
 | SD download | 2,048 B chunk buffer | `SyncClient::downloadJobToSd()` streams HTTP→SD in fixed chunks; SHA-256 state is ~200 B, not proportional to file size |
-| Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~4KB typical) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
+| Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~6KB typical, up from ~4KB before the landscape-strip variant fields added roughly 120 bytes/`JobEntry`) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
 | Wi-Fi + TLS (esp_http_client/mbedTLS) | ~40-60KB while connected | Only resident during the sync window (steps 2-8 above); torn down before deep sleep |
 | Web UI (Wi-Fi/SoftAP + `WebServer`, no TLS) | Similar order of magnitude to the sync-window Wi-Fi row above, minus the TLS overhead | Optional — only resident while the "On-device Web UI" feature is manually toggled on; torn down by the same idle timer as the rest of the UI, never during normal (button/timer-wake) operation |
 

@@ -33,6 +33,12 @@ struct JobManifest {
   uint32_t xtcBytes = 0;
   char xtcSha256[65] = {0};
   uint16_t pageCount = 0;
+
+  // Optional landscape-strip variant (docs/protocol.md §1.1) -- empty
+  // landscapeXtcSha256 means this job has none.
+  uint32_t landscapeXtcBytes = 0;
+  char landscapeXtcSha256[65] = {0};
+  uint16_t landscapePageCount = 0;
 };
 
 enum class Endpoint { Pi, Relay };
@@ -64,9 +70,15 @@ class SyncClient {
   // written, or -1 on network/parse failure.
   int fetchPendingJobs(JobManifest* out, size_t maxCount);
 
-  bool downloadJobToSd(const char* jobId, const char* destPath, const char* expectedSha256Hex, uint32_t expectedBytes);
+  // `variant`, when non-null, is sent as the sync API's `?variant=`
+  // query param (docs/protocol.md §1.2) -- e.g. "landscape" to download
+  // the landscape-strip rendering instead of the normal one.
+  bool downloadJobToSd(const char* jobId, const char* destPath, const char* expectedSha256Hex, uint32_t expectedBytes,
+                       const char* variant = nullptr);
 
-  bool ackJob(const char* jobId, const char* sha256Hex);
+  // `landscapeSha256Hex`, when non-null, is included in the ack body so
+  // one ack call can cover both variants (docs/protocol.md §1.3).
+  bool ackJob(const char* jobId, const char* sha256Hex, const char* landscapeSha256Hex = nullptr);
 
   ApprovalSubmitResult submitApproval(const store::ApprovalEntry& entry, Endpoint endpoint);
 

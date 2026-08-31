@@ -42,7 +42,10 @@ since the device's last ack — see `If-None-Match` note below).
       "xtc_bytes": 184320,
       "xtc_sha256": "b5b2...9c",
       "page_count": 3,
-      "status": "pending"
+      "status": "pending",
+      "landscape_xtc_bytes": 219648,
+      "landscape_xtc_sha256": "a1c4...02",
+      "landscape_page_count": 5
     }
   ],
   "server_time": 1737590500
@@ -53,10 +56,19 @@ since the device's last ack — see `If-None-Match` note below).
 `status=all` returns every job still retained on the Pi regardless of ack
 state, for recovery/debugging.
 
-### 1.2 `GET /jobs/{job_id}/xtc`
+The three `landscape_*` fields are **optional** — present only when this
+job has a landscape-strip rendering (see §4's "Landscape-strip variant"
+note). Absent means none exists (never converted before this feature, or
+the landscape conversion itself failed on this document's page shape); a
+device that sees them absent uses only the normal variant, exactly as
+before this field existed.
 
-Streams the XTC/XTCH file body. Supports HTTP `Range` requests (byte ranges)
-so the firmware can resume an interrupted download without re-fetching bytes
+### 1.2 `GET /jobs/{job_id}/xtc?variant=<normal|landscape>`
+
+Streams the XTC/XTCH file body. `variant` defaults to `normal`;
+`variant=landscape` streams the landscape-strip rendering instead (404 if
+the job has none). Supports HTTP `Range` requests (byte ranges) so the
+firmware can resume an interrupted download without re-fetching bytes
 already written to SD. Response headers:
 
 ```
@@ -72,13 +84,18 @@ mismatch discards the partial file and retries (see §4 of `architecture.md`).
 
 ### 1.3 `POST /jobs/{job_id}/ack`
 
-Body: `{"device_id": "...", "sha256": "<hex sha256 the device computed>"}`
+Body: `{"device_id": "...", "sha256": "<hex sha256 the device computed>", "landscape_sha256": "<optional, if the device also downloaded that variant>"}`
 
-The server verifies the hash matches the stored XTC file's hash. On match it
-records the job as delivered to this device (so it drops out of future
-`status=pending` listings) and returns `{"status": "ok"}`. On mismatch it
-returns `409 Conflict` with `{"status": "hash_mismatch"}` and the job stays
-`pending` for retry.
+The server verifies `sha256` matches the stored normal-variant hash. When
+the job has a landscape variant and the body includes `landscape_sha256`,
+that is verified too — one ack still marks the whole job delivered, there
+is no separate per-variant delivery state. `landscape_sha256` absent from
+the body (a job with no landscape variant, or a device that hasn't
+downloaded one) skips that check entirely, never a mismatch on its own. On
+any hash match failure the server returns `409 Conflict` with
+`{"status": "hash_mismatch"}` and the job stays `pending` for retry; on
+full match it records the job as delivered to this device (so it drops out
+of future `status=pending` listings) and returns `{"status": "ok"}`.
 
 ### 1.4 `POST /approvals`
 
@@ -193,3 +210,14 @@ The X4 reads the exact upstream format documented by
 subset `pi-server/xteink_print_server/xtc_writer.py` emits (monochrome XTG
 pages only; XTCH/grayscale is read-compatible in firmware but not produced by
 the converter, see that doc for the rationale).
+
+**Landscape-strip variant**: the Pi generates a second XTC file per job
+(best-effort — see `xtc_writer.prepare_landscape_strip_images`) where each
+source page is split into panel-sized, pre-rotated strips meant to be read
+with the device turned 90°, using the panel's full width as reading length
+instead of being bound by its shorter dimension. This needed **no format
+change** — it is still an ordinary XTC container, just with more pages per
+source document, each already sized and rotated to exactly the panel's
+native resolution so the firmware's existing raw-copy render path handles
+it unchanged (see §1.1/§1.2/§1.3 above for how a device discovers,
+downloads, and acks this second file).

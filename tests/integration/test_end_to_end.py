@@ -95,6 +95,13 @@ def test_print_dialog_to_approved_physical_print(pi_stack):
     assert downloaded[0].verified
     assert downloaded[0].xtc_bytes == Path(job_row["xtc_path"]).read_bytes()
 
+    # Landscape-strip variant (docs/protocol.md §4): ipp_server.py generates
+    # one alongside the normal rendering for every job, so a real end-to-end
+    # sync should download+verify it too, not just the normal file.
+    assert job_row["xtc_landscape_path"]
+    assert downloaded[0].landscape_verified
+    assert downloaded[0].landscape_xtc_bytes == Path(job_row["xtc_landscape_path"]).read_bytes()
+
     # Once acked, the job drops out of this device's pending list (simulates
     # "X4 goes offline" — no more sync traffic needed for it).
     assert client.list_pending_jobs() == []

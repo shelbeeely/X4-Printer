@@ -13,7 +13,10 @@
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 
-namespace sync {
+// Named syncmgr, not sync: ESP-IDF's newlib unistd.h declares a global
+// ::sync() (POSIX sync(2)), which a top-level `namespace sync` collides
+// with once Arduino.h pulls that header in transitively.
+namespace syncmgr {
 
 struct SyncSummary {
   bool wifiConnected = false;
@@ -45,4 +48,4 @@ class SyncManager {
   void drainApprovalOutbox(net::SyncClient& client, SyncSummary& summary);
 };
 
-}  // namespace sync
+}  // namespace syncmgr

@@ -54,7 +54,7 @@ config::DeviceConfigData deviceConfig;
 uint32_t lastActivityMs = 0;
 
 void runSyncPass() {
-  sync::SyncManager manager(deviceConfig, jobIndex, outboxIndex);
+  syncmgr::SyncManager manager(deviceConfig, jobIndex, outboxIndex);
   uiState.lastSyncSummary = manager.runFullSync();
   uiState.hasSyncedOnce = true;
 }

@@ -108,20 +108,29 @@ void actionMenuScreen(App::ScreenType& screen, void* userPtr) {
 
   screen.header(job ? job->title : "Document", "Choose an action");
 
-  // Row actionValue 0-3 maps to Print/Keep/Delete/Cancel; the single
-  // ActionMenuRowSelect handler below switches on event.value — the same
-  // "list fires one action, the handler reads event.value" pattern
+  // Row actionValue 0-3 maps to Print/Keep/Delete/Cancel, and 4 (shown only
+  // when the job has a landscape variant) toggles the reader's view mode;
+  // the single ActionMenuRowSelect handler below switches on event.value —
+  // the same "list fires one action, the handler reads event.value" pattern
   // docs/freeink-ui.md's minimal example uses for its book list
   // (`state.selected = event.value` in handleOpen), rather than trying to
   // wire a distinct action id per row.
-  freeink::ui::ListItem items[4] = {
+  bool hasLandscape = job != nullptr && job->landscapeXtcPath[0] != '\0';
+  freeink::ui::ListItem items[5] = {
       {.label = "Print", .actionValue = 0},
       {.label = "Keep", .actionValue = 1},
       {.label = "Delete", .actionValue = 2},
       {.label = "Cancel", .actionValue = 3},
+      {.label = state.landscapeView ? "View: Portrait" : "View: Landscape", .actionValue = 4},
   };
   static int16_t selected = 0;
-  screen.list(items, 4, selected, ActionMenuRowSelect);
+  int16_t rowCount = hasLandscape ? 5 : 4;
+  // `selected` persists across renders so the cursor survives re-renders
+  // of the same open menu, but the row count now varies per job (5 with a
+  // landscape variant, 4 without) -- clamp rather than let a stale index
+  // from a previous job's 5-row menu be fed into this one's 4-row list.
+  if (selected >= rowCount) selected = 0;
+  screen.list(items, rowCount, selected, ActionMenuRowSelect);
 
   const freeink::ui::FooterAction footer[] = {
       {.label = "Cancel", .action = ActionCancelMenu},
@@ -190,7 +199,9 @@ void readerScreen(App::ScreenType& screen, void* userPtr) {
 
   if (!state.readerOpenForSelected) {
     state.reader.close();
-    state.readerOpenForSelected = state.reader.open(job.xtcPath);
+    const char* path =
+        (state.landscapeView && job.landscapeXtcPath[0] != '\0') ? job.landscapeXtcPath : job.xtcPath;
+    state.readerOpenForSelected = state.reader.open(path);
     state.currentPage = 0;
   }
 
@@ -208,7 +219,8 @@ void readerScreen(App::ScreenType& screen, void* userPtr) {
   // comment for why this ordering is deliberate.
   char footerLabel[32];
   uint16_t total = state.readerOpenForSelected ? state.reader.pageCount() : 0;
-  std::snprintf(footerLabel, sizeof(footerLabel), "%u / %u", state.currentPage + 1, total);
+  std::snprintf(footerLabel, sizeof(footerLabel), "%u / %u%s", state.currentPage + 1, total,
+                state.landscapeView ? " L" : "");
   const freeink::ui::FooterAction footer[] = {
       {.label = "Prev", .action = ActionPrevPage},
       {.label = footerLabel, .action = ActionShowActionMenu},
@@ -286,6 +298,7 @@ void initApp(App& app, InboxUiState& state) {
         auto& s = *static_cast<InboxUiState*>(userPtr);
         s.selectedJobIndex = event.value;
         s.readerOpenForSelected = false;
+        s.landscapeView = false;
         s.mode = ScreenMode::Reader;
       },
       &state);
@@ -344,8 +357,18 @@ void initApp(App& app, InboxUiState& state) {
           case 2:
             enqueueApproval(s, store::ApprovalAction::Delete);
             break;
+          case 4:
+            // Toggle landscape/portrait view -- only reachable when
+            // actionMenuScreen() offered this row (job has a landscape
+            // variant). Force a reopen so readerScreen() picks up the
+            // other file.
+            s.landscapeView = !s.landscapeView;
+            s.readerOpenForSelected = false;
+            s.currentPage = 0;
+            s.mode = ScreenMode::Reader;
+            break;
           default:
-            s.mode = ScreenMode::Reader;  // Cancel
+            s.mode = ScreenMode::Reader;  // Cancel (3), or anything else
             break;
         }
       },

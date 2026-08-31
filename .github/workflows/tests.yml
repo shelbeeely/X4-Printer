@@ -26,14 +26,14 @@
 # the venv the README uses for local dev isn't needed here).
 #
 # Out of scope: building the actual device firmware (`pio run`), which
-# needs the external freeink-sdk checkout and the ESP32 toolchain — that
-# best-effort build lives in a separate workflow.
+# needs the freeink-sdk submodule checked out (see .gitmodules) and the
+# ESP32 toolchain — that best-effort build lives in a separate workflow.
 name: Tests
 
 on:
   push:
     branches:
-      - claude/xteink-print-inbox-system-6lh4v6
+      - main
   pull_request:
 
 jobs:

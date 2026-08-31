@@ -3,11 +3,12 @@
 #
 # Why `build-firmware` runs with `continue-on-error: true`:
 #   The firmware build depends on things this workflow cannot guarantee:
-#   cloning the external https://github.com/Free-Ink/freeink-sdk repo (not
-#   vendored here, see docs/setup-x4.md step 1) and downloading the pinned
-#   ESP32 PlatformIO platform, both over the network on GitHub-hosted
-#   runners. If either is flaky/unavailable, or the firmware source itself
-#   temporarily fails to build, that must NEVER take the Pages site down —
+#   checking out the freeink-sdk submodule (see .gitmodules -- vendored as
+#   a submodule of https://github.com/Free-Ink/freeink-sdk, not copied into
+#   this repo) and downloading the pinned ESP32 PlatformIO platform, both
+#   over the network on GitHub-hosted runners. If either is flaky/
+#   unavailable, or the firmware source itself temporarily fails to build,
+#   that must NEVER take the Pages site down —
 #   the docs/how-it-works/setup pages have no dependency on firmware
 #   compiling. So the firmware job is allowed to fail without failing the
 #   workflow, and the site job runs unconditionally after it (`needs:
@@ -48,19 +49,17 @@
 # Binary filename assumption: PlatformIO's Arduino-ESP32 build for
 # esp32-c3-devkitm-1 normally emits bootloader.bin, partitions.bin, and
 # firmware.bin under firmware/.pio/build/xteink_x4_release/. This has not
-# been verified against an actual CI run of this repo's build (sandboxed
-# dev environment has no network access to freeink-sdk or the PlatformIO
-# platform download) -- if the real output differs, update the `find`/copy
+# been verified against an actual CI run of this repo's build (the
+# freeink-sdk submodule is now vendored, but no sandboxed dev environment
+# so far has had the ESP32 toolchain/PlatformIO platform available to do a
+# real device build) -- if the real output differs, update the `find`/copy
 # step below and the manifest `parts` paths above together.
 
 name: Deploy Pages
 
 on:
   push:
-    # NOTE: this repo has no `main` yet -- the feature branch below IS the
-    # default branch for now. Update this to `main` once/if this repo
-    # adopts one.
-    branches: [claude/xteink-print-inbox-system-6lh4v6]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -82,11 +81,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Clone freeink-sdk
-        # Exact path firmware/platformio.ini's `symlink://freeink-sdk/...`
-        # lib_deps expect, relative to firmware/.
-        run: git clone https://github.com/Free-Ink/freeink-sdk firmware/freeink-sdk
+        with:
+          # freeink-sdk is now a git submodule at firmware/freeink-sdk --
+          # the exact path firmware/platformio.ini's `symlink://freeink-sdk/...`
+          # lib_deps expect, relative to firmware/. Pinned via .gitmodules
+          # instead of always pulling the SDK's default-branch tip.
+          submodules: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
