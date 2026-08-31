@@ -14,6 +14,7 @@
     <button class="tab-btn" data-tab="jobs">Jobs</button>
     <button class="tab-btn" data-tab="devices">Devices</button>
     <button class="tab-btn" data-tab="approvals">Approvals</button>
+    <button class="tab-btn" data-tab="device-config">Calendars &amp; Wi-Fi</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </nav>
 </header>
@@ -63,6 +64,35 @@
       </tr></thead>
       <tbody></tbody>
     </table>
+  </section>
+
+  <section id="tab-device-config" class="tab-panel" hidden>
+    <h1>Calendars &amp; Wi-Fi</h1>
+    <p class="hint">Pushed to every paired X4 on its next sync (no radio window of its own — rides the same connect/sync/sleep the device already does for print jobs). Calendars replace the device's list wholesale; Wi-Fi networks are merged in without ever removing a network the device already has saved, so a Pi-side list that's missing the device's current network can't strand it.</p>
+
+    <h2>Calendars</h2>
+    <table class="data-table" id="calendars-table">
+      <thead><tr><th>Label</th><th>URL</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <form id="calendar-form" class="inline-form">
+      <input type="text" name="label" id="cal-label" placeholder="Label (optional)">
+      <input type="url" name="url" id="cal-url" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics" required>
+      <button type="submit" class="btn btn-primary">Add calendar</button>
+    </form>
+    <p class="hint" id="calendars-limit-hint"></p>
+
+    <h2>Wi-Fi networks</h2>
+    <table class="data-table" id="wifi-table">
+      <thead><tr><th>SSID</th><th>Password</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <form id="wifi-form" class="inline-form">
+      <input type="text" name="ssid" id="wifi-ssid" placeholder="SSID" required>
+      <input type="text" name="password" id="wifi-password" placeholder="Password">
+      <button type="submit" class="btn btn-primary">Add / update network</button>
+    </form>
+    <p class="hint" id="wifi-limit-hint"></p>
   </section>
 
   <section id="tab-settings" class="tab-panel" hidden>

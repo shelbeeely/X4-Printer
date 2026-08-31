@@ -152,6 +152,60 @@ int SyncClient::fetchPendingJobs(JobManifest* out, size_t maxCount) {
   return static_cast<int>(n);
 }
 
+bool SyncClient::fetchDeviceConfig(DeviceConfigManifest& out) {
+  if (!piConfigured()) return false;
+
+  WiFiClientSecure client;
+  if (!configureClientForEndpoint(client, Endpoint::Pi)) return false;
+
+  HTTPClient http;
+  http.setConnectTimeout(kHttpTimeoutMs);
+  http.setTimeout(kHttpTimeoutMs);
+
+  String url = String(cfg_.piBaseUrl) + "/devices/" + cfg_.deviceId + "/config";
+  if (!http.begin(client, url)) return false;
+  http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
+  http.addHeader("X-Device-Id", cfg_.deviceId);
+
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, http.getStream());
+  http.end();
+  if (err) return false;
+
+  DeviceConfigManifest parsed;
+
+  JsonArrayConst calendars = doc["calendars"].as<JsonArrayConst>();
+  for (JsonObjectConst cal : calendars) {
+    if (parsed.calendarCount >= config::kMaxCalendars) break;
+    const char* url2 = cal["url"] | "";
+    if (url2[0] == '\0') continue;
+    config::CalendarFeed& feed = parsed.calendars[parsed.calendarCount];
+    std::strncpy(feed.url, url2, sizeof(feed.url) - 1);
+    std::strncpy(feed.label, cal["label"] | "", sizeof(feed.label) - 1);
+    parsed.calendarCount++;
+  }
+
+  JsonArrayConst wifiNetworks = doc["wifi_networks"].as<JsonArrayConst>();
+  for (JsonObjectConst net : wifiNetworks) {
+    if (parsed.wifiCount >= config::kMaxWifiNetworks) break;
+    const char* ssid = net["ssid"] | "";
+    if (ssid[0] == '\0') continue;
+    config::WifiCredential& cred = parsed.wifiNetworks[parsed.wifiCount];
+    std::strncpy(cred.ssid, ssid, sizeof(cred.ssid) - 1);
+    std::strncpy(cred.password, net["password"] | "", sizeof(cred.password) - 1);
+    parsed.wifiCount++;
+  }
+
+  out = parsed;
+  return true;
+}
+
 bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const char* expectedSha256Hex,
                                   uint32_t expectedBytes, const char* variant) {
   if (!piConfigured()) return false;

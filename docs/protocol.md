@@ -140,6 +140,50 @@ Lightweight health/clock-sync check used before a full sync (cheap way to
 confirm the Pi is reachable on the current network before attempting the
 heavier job listing). Returns `{"server_time": 1737590500, "printer_ready": true}`.
 
+### 1.6 `GET /devices/{device_id}/config`
+
+Household-wide (not per-device) calendar feeds and Wi-Fi networks, managed
+from the Pi's admin console (`admin_api.py`'s "Calendars & Wi-Fi" tab) and
+pulled by every paired device on each sync — see
+`firmware/src/sync/SyncManager.cpp`. This is the primary way to manage
+both lists once a device is paired; hand-editing `/system/calendars.json`
+and `/system/wifi.json` on the SD card (`docs/setup-x4.md`) still works
+and remains the *only* way to get a brand-new device onto Wi-Fi for its
+very first sync (a device with no saved network yet has no way to reach
+this endpoint in the first place).
+
+```json
+{
+  "calendars": [{"url": "https://calendar.google.com/calendar/ical/.../basic.ics", "label": "Work"}],
+  "wifi_networks": [{"ssid": "HomeWiFi", "password": "hunter2"}],
+  "server_time": 1737590500
+}
+```
+
+The device applies these two lists differently, both on the firmware side
+(`config::CalendarConfig`/`config::WifiStore`):
+
+- **Calendars**: wholesale replace — the Pi's list becomes the device's
+  entire `/system/calendars.json` contents. There's no on-device way to
+  add a calendar independently of the Pi, so nothing is lost by this.
+- **Wi-Fi networks**: merged in via `WifiStore::addOrUpdate()` (insert or
+  update by SSID) — **never** a wholesale replace, and never a delete. A
+  device is only ever reading this endpoint because it's already
+  successfully connected to *some* saved network; if the Pi's list
+  happened to omit that network (e.g. an admin only entered a guest SSID),
+  a wholesale replace would erase the very credential the device used to
+  get here, stranding it. Merge-only means the Pi's list can only ever
+  grow what the device knows, never shrink it — removing a network
+  on-device (Settings > Wi-Fi tab, view + remove) is the only way to
+  actually forget one, and only sticks if the Pi's list doesn't still
+  include it (removed there too, or never added).
+
+Both lists are capped by firmware's fixed-capacity arrays
+(`config::kMaxCalendars` = 4, `config::kMaxWifiNetworks` = 8) — the admin
+console's add endpoints reject a request that would exceed either cap
+(`admin_api.py`'s `MAX_CALENDAR_FEEDS`/`MAX_WIFI_NETWORKS`) rather than
+letting the device silently truncate the list on sync.
+
 ## 2. Relay Protocol (X4 <-> Relay <-> Pi, over the internet)
 
 Base URL: `https://<relay-host>/relay/v1`. Both the Pi and the X4 authenticate

@@ -7,6 +7,7 @@
 
 #include "calendar/CalendarSync.h"
 #include "config/CalendarConfig.h"
+#include "config/WifiStore.h"
 #include "net/WifiManager.h"
 
 namespace syncmgr {
@@ -57,6 +58,11 @@ SyncSummary SyncManager::runFullSync() {
   if (summary.approvalsSynced > 0) {
     downloadPendingJobs(client, summary);
   }
+
+  // Pi-managed calendar/Wi-Fi config (docs/protocol.md §1.6) -- before the
+  // calendar sync below, so a feed list edited on the Pi's admin console
+  // takes effect the same wake it's pulled, not the one after.
+  syncDeviceConfig(client);
 
   // Calendar sync (docs/architecture.md's idle-screen "next event" widget,
   // ui/InboxUI.cpp) rides this same connected window rather than opening
@@ -174,6 +180,29 @@ void SyncManager::drainApprovalOutbox(net::SyncClient& client, SyncSummary& summ
   if (changed) {
     outbox_.compactSynced();
     store::saveApprovalOutbox(outbox_);
+  }
+}
+
+void SyncManager::syncDeviceConfig(net::SyncClient& client) {
+  net::DeviceConfigManifest manifest;
+  if (!client.fetchDeviceConfig(manifest)) return;  // unreachable/unpaired -- leave existing config as-is
+
+  // Calendars: wholesale replace -- see config/CalendarConfig.h's
+  // replaceAll() comment for why this is safe (no on-device add path to
+  // clobber).
+  config::CalendarConfig::instance().replaceAll(manifest.calendars, manifest.calendarCount);
+  config::CalendarConfig::instance().save();
+
+  // Wi-Fi: merge only, via the exact same addOrUpdate() the Settings
+  // screen's on-device flows use -- never a replace, so a Pi-side list
+  // that's missing the network this device is currently on can't strand
+  // it (see docs/protocol.md §1.6).
+  if (manifest.wifiCount > 0) {
+    config::WifiStore& wifiStore = config::WifiStore::instance();
+    for (size_t i = 0; i < manifest.wifiCount; i++) {
+      wifiStore.addOrUpdate(manifest.wifiNetworks[i].ssid, manifest.wifiNetworks[i].password);
+    }
+    wifiStore.save();
   }
 }
 

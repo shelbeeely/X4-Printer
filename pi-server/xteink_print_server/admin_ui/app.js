@@ -70,6 +70,7 @@ const loaders = {
   jobs: loadJobs,
   devices: loadDevices,
   approvals: loadApprovals,
+  "device-config": loadDeviceConfig,
   settings: loadSettings,
 };
 
@@ -249,6 +250,106 @@ async function loadApprovals() {
         el("td", { text: fmtTime(a.received_at) }),
       ]),
     );
+  }
+}
+
+// -- calendars & Wi-Fi (synced to every device on its next wake) -----------
+
+async function loadDeviceConfig() {
+  await Promise.all([loadCalendars(), loadWifiNetworks()]);
+}
+
+async function loadCalendars() {
+  const { calendars, max } = await api("/calendars");
+  const tbody = document.querySelector("#calendars-table tbody");
+  tbody.replaceChildren();
+  if (calendars.length === 0) {
+    tbody.appendChild(el("tr", {}, [el("td", { class: "empty", colspan: "3", text: "No calendars configured." })]));
+  }
+  for (const cal of calendars) {
+    tbody.appendChild(
+      el("tr", {}, [
+        el("td", { text: cal.label || "—" }),
+        el("td", {}, [el("code", { text: cal.url })]),
+        el("td", {}, [
+          el("button", {
+            class: "btn btn-danger",
+            text: "Remove",
+            onclick: () => deleteCalendar(cal.id),
+          }),
+        ]),
+      ]),
+    );
+  }
+  document.getElementById("calendars-limit-hint").textContent = `${calendars.length} / ${max} calendars used.`;
+}
+
+document.getElementById("calendar-form").addEventListener("submit", async (evt) => {
+  evt.preventDefault();
+  const url = document.getElementById("cal-url").value.trim();
+  const label = document.getElementById("cal-label").value.trim();
+  try {
+    await api("/calendars", { method: "POST", body: JSON.stringify({ url, label }) });
+    evt.target.reset();
+    await loadCalendars();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+async function deleteCalendar(id) {
+  try {
+    await api(`/calendars/${id}/delete`, { method: "POST" });
+    await loadCalendars();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadWifiNetworks() {
+  const { wifi_networks: networks, max } = await api("/wifi-networks");
+  const tbody = document.querySelector("#wifi-table tbody");
+  tbody.replaceChildren();
+  if (networks.length === 0) {
+    tbody.appendChild(el("tr", {}, [el("td", { class: "empty", colspan: "3", text: "No Wi-Fi networks configured." })]));
+  }
+  for (const net of networks) {
+    tbody.appendChild(
+      el("tr", {}, [
+        el("td", { text: net.ssid }),
+        el("td", { text: net.password ? "••••••••" : "—" }),
+        el("td", {}, [
+          el("button", {
+            class: "btn btn-danger",
+            text: "Remove",
+            onclick: () => deleteWifiNetwork(net.id),
+          }),
+        ]),
+      ]),
+    );
+  }
+  document.getElementById("wifi-limit-hint").textContent = `${networks.length} / ${max} networks used.`;
+}
+
+document.getElementById("wifi-form").addEventListener("submit", async (evt) => {
+  evt.preventDefault();
+  const ssid = document.getElementById("wifi-ssid").value.trim();
+  const password = document.getElementById("wifi-password").value;
+  try {
+    await api("/wifi-networks", { method: "POST", body: JSON.stringify({ ssid, password }) });
+    evt.target.reset();
+    await loadWifiNetworks();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+async function deleteWifiNetwork(id) {
+  try {
+    await api(`/wifi-networks/${id}/delete`, { method: "POST" });
+    await loadWifiNetworks();
+  } catch (err) {
+    showError(err.message);
   }
 }
 

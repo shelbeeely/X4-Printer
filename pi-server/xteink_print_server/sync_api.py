@@ -91,6 +91,8 @@ class SyncApiHandler(BaseHTTPRequestHandler):
             self._handle_list_jobs(rest[1], parsed.query)
         elif len(rest) == 3 and rest[0] == "devices" and rest[2] == "status":
             self._handle_status(rest[1])
+        elif len(rest) == 3 and rest[0] == "devices" and rest[2] == "config":
+            self._handle_device_config(rest[1])
         elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "xtc":
             self._handle_download_xtc(rest[1], parsed.query)
         else:
@@ -118,6 +120,26 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         if device_id is None:
             return
         self._send_json(200, {"server_time": int(time.time()), "printer_ready": bool(self.config.cups_queue)})
+
+    def _handle_device_config(self, path_device_id: str) -> None:
+        """docs/protocol.md §1.6 -- household-wide calendar feeds and Wi-Fi
+        networks, managed from the admin console (admin_api.py) and pulled
+        by every paired device on each sync. See config/CalendarConfig.h
+        and config/WifiStore.h on the firmware side for how these get
+        applied to the device's own SD-backed stores (a wholesale replace
+        for calendars, an addOrUpdate merge for Wi-Fi -- never a device
+        lockout from a Pi-side list that's missing the network it's
+        currently on)."""
+        device_id = self._authenticate()
+        if device_id is None:
+            return
+        if device_id != path_device_id:
+            self._send_json(403, {"error": "device id mismatch"})
+            return
+
+        calendars = [{"url": row["url"], "label": row["label"]} for row in self.db.list_calendar_feeds()]
+        wifi_networks = [{"ssid": row["ssid"], "password": row["password"]} for row in self.db.list_wifi_networks()]
+        self._send_json(200, {"calendars": calendars, "wifi_networks": wifi_networks, "server_time": int(time.time())})
 
     def _handle_list_jobs(self, path_device_id: str, query: str) -> None:
         device_id = self._authenticate()

@@ -74,6 +74,34 @@ CREATE TABLE IF NOT EXISTS devices (
     last_seen_at INTEGER
 );
 
+-- Household-wide (not per-device), managed from the admin console and
+-- pushed to every paired device via GET /devices/{id}/config
+-- (docs/protocol.md §1.6) -- see sync_api.py's _handle_device_config.
+-- `position` is the display/priority order the admin console lets you
+-- drag-reorder; the device only ever keeps the first N (firmware's
+-- config::kMaxCalendars / kMaxWifiNetworks -- see admin_api.py's
+-- MAX_CALENDAR_FEEDS/MAX_WIFI_NETWORKS, kept in sync with those constants
+-- by hand since there's no shared cross-language header in this repo).
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL
+);
+
+-- UNIQUE(ssid): add_or_update_wifi_network is an upsert keyed on ssid, same
+-- "insert or update, never duplicate" shape as firmware's own
+-- WifiStore::addOrUpdate (config/WifiStore.h) that the device applies this
+-- list through on sync -- see that header for why this is a merge, not a
+-- wholesale replace (a Pi-side list missing the network the device is
+-- currently on must never strand it).
+CREATE TABLE IF NOT EXISTS wifi_networks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ssid TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    position INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_device ON approvals(device_id);
 """
@@ -369,3 +397,44 @@ class Database:
     def rotate_device_token(self, device_id: str, new_token_hash: str) -> None:
         with self.transaction() as conn:
             conn.execute("UPDATE devices SET token_hash = ? WHERE device_id = ?", (new_token_hash, device_id))
+
+    # -- Calendar feeds (admin-managed, synced to every device) ---------------
+
+    def list_calendar_feeds(self) -> list[sqlite3.Row]:
+        return self.query("SELECT * FROM calendar_feeds ORDER BY position ASC, id ASC")
+
+    def add_calendar_feed(self, url: str, label: str) -> int:
+        with self.transaction() as conn:
+            next_position = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM calendar_feeds").fetchone()[0]
+            cur = conn.execute(
+                "INSERT INTO calendar_feeds (url, label, position) VALUES (?, ?, ?)", (url, label, next_position)
+            )
+            return cur.lastrowid
+
+    def delete_calendar_feed(self, feed_id: int) -> None:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM calendar_feeds WHERE id = ?", (feed_id,))
+
+    # -- Wi-Fi networks (admin-managed, synced to every device) ---------------
+
+    def list_wifi_networks(self) -> list[sqlite3.Row]:
+        return self.query("SELECT * FROM wifi_networks ORDER BY position ASC, id ASC")
+
+    def add_or_update_wifi_network(self, ssid: str, password: str) -> int:
+        """Upsert by ssid -- editing a saved network's password from the
+        admin console updates the same row rather than creating a
+        duplicate, matching the UNIQUE(ssid) constraint and the firmware
+        side's own addOrUpdate() semantics it's applied through."""
+        with self.transaction() as conn:
+            next_position = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM wifi_networks").fetchone()[0]
+            cur = conn.execute(
+                """INSERT INTO wifi_networks (ssid, password, position) VALUES (?, ?, ?)
+                   ON CONFLICT(ssid) DO UPDATE SET password=excluded.password""",
+                (ssid, password, next_position),
+            )
+            row = conn.execute("SELECT id FROM wifi_networks WHERE ssid = ?", (ssid,)).fetchone()
+            return row["id"]
+
+    def delete_wifi_network(self, network_id: int) -> None:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM wifi_networks WHERE id = ?", (network_id,))

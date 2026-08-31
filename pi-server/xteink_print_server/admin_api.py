@@ -78,6 +78,16 @@ assert set(SETTINGS_TYPES) == RUNTIME_OVERRIDABLE_FIELDS
 JOB_APPROVAL_ACTIONS = {"print", "keep", "delete"}
 JOB_ADMIN_ONLY_ACTIONS = {"requeue", "purge"}
 
+# Mirrors firmware's fixed-capacity arrays (config::kMaxCalendars in
+# firmware/src/config/CalendarConfig.h, config::kMaxWifiNetworks in
+# firmware/src/config/WifiStore.h) -- there's no shared cross-language
+# header in this repo, so these are kept in sync by hand. Enforced here
+# (reject the add) rather than silently letting the device truncate the
+# list on sync, so "I added a 5th calendar and it never shows up" is a
+# clear 400 at add-time, not a silent on-device drop.
+MAX_CALENDAR_FEEDS = 4
+MAX_WIFI_NETWORKS = 8
+
 
 class AdminApiHandler(BaseHTTPRequestHandler):
     server_version = "XteinkAdminAPI/0.1"
@@ -201,6 +211,10 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_list_approvals()
         elif rest == ["settings"]:
             self._handle_get_settings()
+        elif rest == ["calendars"]:
+            self._handle_list_calendars()
+        elif rest == ["wifi-networks"]:
+            self._handle_list_wifi_networks()
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -222,6 +236,14 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_rotate_token(rest[1])
         elif rest == ["settings"]:
             self._handle_post_settings()
+        elif rest == ["calendars"]:
+            self._handle_add_calendar()
+        elif len(rest) == 3 and rest[0] == "calendars" and rest[2] == "delete":
+            self._handle_delete_calendar(rest[1])
+        elif rest == ["wifi-networks"]:
+            self._handle_add_wifi_network()
+        elif len(rest) == 3 and rest[0] == "wifi-networks" and rest[2] == "delete":
+            self._handle_delete_wifi_network(rest[1])
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -501,6 +523,65 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             logger.info("relay disabled via admin console")
 
         self._send_json(200, {name: getattr(self.config, name) for name in SETTINGS_TYPES})
+
+    # -- handlers: calendars (synced to every device, docs/protocol.md §1.6) --
+
+    def _handle_list_calendars(self) -> None:
+        calendars = [
+            {"id": row["id"], "url": row["url"], "label": row["label"]} for row in self.db.list_calendar_feeds()
+        ]
+        self._send_json(200, {"calendars": calendars, "max": MAX_CALENDAR_FEEDS})
+
+    def _handle_add_calendar(self) -> None:
+        body = self._read_json_body()
+        if body is None or not str(body.get("url", "")).strip():
+            self._send_json(400, {"error": "url is required"})
+            return
+        if len(self.db.list_calendar_feeds()) >= MAX_CALENDAR_FEEDS:
+            self._send_json(400, {"error": f"at most {MAX_CALENDAR_FEEDS} calendars are supported on-device"})
+            return
+        feed_id = self.db.add_calendar_feed(str(body["url"]).strip(), str(body.get("label", "")).strip())
+        self._send_json(200, {"id": feed_id})
+
+    def _handle_delete_calendar(self, feed_id_str: str) -> None:
+        try:
+            feed_id = int(feed_id_str)
+        except ValueError:
+            self._send_json(400, {"error": "invalid calendar id"})
+            return
+        self.db.delete_calendar_feed(feed_id)
+        self._send_json(200, {"status": "deleted"})
+
+    # -- handlers: Wi-Fi networks (synced to every device) ---------------------
+
+    def _handle_list_wifi_networks(self) -> None:
+        networks = [
+            {"id": row["id"], "ssid": row["ssid"], "password": row["password"]}
+            for row in self.db.list_wifi_networks()
+        ]
+        self._send_json(200, {"wifi_networks": networks, "max": MAX_WIFI_NETWORKS})
+
+    def _handle_add_wifi_network(self) -> None:
+        body = self._read_json_body()
+        if body is None or not str(body.get("ssid", "")).strip():
+            self._send_json(400, {"error": "ssid is required"})
+            return
+        ssid = str(body["ssid"]).strip()
+        existing = {row["ssid"] for row in self.db.list_wifi_networks()}
+        if ssid not in existing and len(existing) >= MAX_WIFI_NETWORKS:
+            self._send_json(400, {"error": f"at most {MAX_WIFI_NETWORKS} Wi-Fi networks are supported on-device"})
+            return
+        network_id = self.db.add_or_update_wifi_network(ssid, str(body.get("password", "")))
+        self._send_json(200, {"id": network_id})
+
+    def _handle_delete_wifi_network(self, network_id_str: str) -> None:
+        try:
+            network_id = int(network_id_str)
+        except ValueError:
+            self._send_json(400, {"error": "invalid network id"})
+            return
+        self.db.delete_wifi_network(network_id)
+        self._send_json(200, {"status": "deleted"})
 
 
 class AdminApiServer(ThreadingHTTPServer):

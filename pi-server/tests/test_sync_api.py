@@ -85,6 +85,38 @@ def test_wrong_token_is_rejected(running_sync_api):
     assert exc.value.code == 401
 
 
+def test_device_config_returns_calendars_and_wifi(running_sync_api):
+    base, db, _config = running_sync_api
+    db.add_calendar_feed("https://example.com/a.ics", "Work")
+    db.add_or_update_wifi_network("HomeWiFi", "hunter2")
+
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/config").read())
+    assert resp["calendars"] == [{"url": "https://example.com/a.ics", "label": "Work"}]
+    assert resp["wifi_networks"] == [{"ssid": "HomeWiFi", "password": "hunter2"}]
+    assert "server_time" in resp
+
+
+def test_device_config_empty_when_unconfigured(running_sync_api):
+    base, _db, _config = running_sync_api
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/config").read())
+    assert resp["calendars"] == []
+    assert resp["wifi_networks"] == []
+
+
+def test_device_config_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/config", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_device_config_rejects_device_id_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/dev-other/config")
+    assert exc.value.code == 403
+
+
 def test_list_pending_jobs(running_sync_api):
     base, db, config = running_sync_api
     job_id = _insert_job(db, config)

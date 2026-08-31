@@ -46,6 +46,10 @@ class SyncManager {
 
   void downloadPendingJobs(net::SyncClient& client, SyncSummary& summary);
   void drainApprovalOutbox(net::SyncClient& client, SyncSummary& summary);
+  // docs/protocol.md §1.6: pulls the Pi-managed calendar/Wi-Fi lists and
+  // applies them to config::CalendarConfig/WifiStore. A no-op (leaves
+  // existing on-device config untouched) if the Pi isn't reachable.
+  void syncDeviceConfig(net::SyncClient& client);
 };
 
 }  // namespace syncmgr
