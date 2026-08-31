@@ -196,6 +196,10 @@ jobs:
       - name: Run tests/docker against the real CUPS daemon
         run: docker compose -f docker-compose.test.yml run --rm pi-server python -m pytest tests_docker -q
 
+      - name: Show cups container logs (diagnostics, always run)
+        if: always()
+        run: docker compose -f docker-compose.test.yml logs cups
+
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.test.yml down -v

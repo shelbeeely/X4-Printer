@@ -24,7 +24,11 @@ RUN chmod +x /entrypoint.sh \
 EXPOSE 631
 VOLUME ["/output"]
 
+# /tmp/cups-ready is only touched by entrypoint.sh once the PDF queue is
+# fully configured against the one long-lived cupsd this container runs --
+# checking `lpstat -p PDF` alone isn't enough of a signal on its own (see
+# entrypoint.sh's header comment for the race that taught us that).
 HEALTHCHECK --interval=2s --timeout=5s --retries=30 \
-    CMD lpstat -h localhost:631 -p PDF | grep -qi 'PDF'
+    CMD test -f /tmp/cups-ready && lpstat -h localhost:631 -p PDF
 
 ENTRYPOINT ["/entrypoint.sh"]

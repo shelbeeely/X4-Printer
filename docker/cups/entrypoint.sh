@@ -1,13 +1,20 @@
 #!/bin/sh
 # Bootstraps a real, working CUPS install with one "PDF" virtual printer
 # (cups-pdf backend) that other services on the compose network can submit
-# to. Two-phase: bring cupsd up once to configure it via lpadmin/cupsctl
-# (they talk to the running daemon over IPP on localhost, so it has to
-# already be up), then hand off to a foreground `cupsd -f` as PID 1 so the
-# container's lifecycle is tied to the daemon, not to this script.
+# to. Starts cupsd once, in the foreground, as a background job of this
+# script (not a kill-and-respawn dance -- an earlier version of this file
+# started a backgrounding `cupsd`, configured it via lpadmin/cupsctl, then
+# killed and re-exec'd a *second*, foreground instance; that left a real
+# window where the queue config lpadmin had just written could race the
+# second daemon's own startup reading it back, and was the actual cause of
+# CI seeing "the printer or class does not exist" moments after the
+# healthcheck had reported healthy). One daemon, configured in place, no
+# restart.
 set -eu
 
-/usr/sbin/cupsd
+/usr/sbin/cupsd -f &
+CUPSD_PID=$!
+trap 'kill "$CUPSD_PID" 2>/dev/null; wait "$CUPSD_PID" 2>/dev/null' TERM INT
 
 for i in $(seq 1 30); do
   if lpstat -h localhost:631 -r >/dev/null 2>&1; then
@@ -21,12 +28,16 @@ done
 # never exposed beyond it. `cupsctl --remote-any` is the standard shortcut
 # for "accept connections from other hosts, no auth" (opens Listen/Allow
 # directives it would otherwise take several individual `cupsctl` calls to
-# set).
+# set). cupsctl applies to the already-running daemon above -- no restart.
 cupsctl --remote-any WebInterface=no
 
 # printer-driver-cups-pdf's own postinst normally registers a "PDF" queue
 # automatically; this is a defensive fallback for images/versions where it
-# doesn't, so container startup never silently ships with no queue at all.
+# doesn't (observed in CI: "CUPS failed to reload its configuration! /
+# Skipped automated creation of the PDF queue." during `apt-get install`,
+# because cupsd isn't running inside a `docker build` layer for the
+# postinst's own lpadmin call to reach), so container startup never
+# silently ships with no queue at all.
 if ! lpstat -p PDF >/dev/null 2>&1; then
   ppd="$(find /usr/share/ppd -iname 'CUPS-PDF*.ppd' 2>/dev/null | head -n1 || true)"
   if [ -n "$ppd" ]; then
@@ -43,14 +54,11 @@ cupsaccept PDF 2>/dev/null || true
 cupsenable PDF 2>/dev/null || true
 lpadmin -p PDF -E
 
-# cupsd (invoked above with no -f) daemonizes itself -- forks into the
-# background and returns immediately -- so it was never this shell's job
-# to `wait`/`kill %1` on; find it by name instead and stop it before
-# re-exec'ing a foreground instance as PID 1.
-pkill -x cupsd 2>/dev/null || true
-for i in $(seq 1 10); do
-  pgrep -x cupsd >/dev/null 2>&1 || break
-  sleep 1
-done
+echo "entrypoint.sh: PDF queue ready:"
+lpstat -p PDF
 
-exec /usr/sbin/cupsd -f
+# Marker file for docker-compose.test.yml's healthcheck -- see its comment
+# for why `lpstat -p PDF` alone isn't a reliable enough signal.
+touch /tmp/cups-ready
+
+wait "$CUPSD_PID"

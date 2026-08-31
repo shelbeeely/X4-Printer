@@ -20,7 +20,10 @@ services:
     volumes:
       - cups-output:/output
     healthcheck:
-      test: ["CMD", "lpstat", "-h", "localhost:631", "-p", "PDF"]
+      # CMD-SHELL (not CMD): needs `&&`, which the exec form can't run.
+      # See docker/cups/Dockerfile's matching HEALTHCHECK comment for why
+      # the /tmp/cups-ready marker matters, not just the lpstat query.
+      test: ["CMD-SHELL", "test -f /tmp/cups-ready && lpstat -h localhost:631 -p PDF"]
       interval: 2s
       timeout: 5s
       retries: 30
