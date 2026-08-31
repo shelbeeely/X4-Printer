@@ -146,7 +146,9 @@ cd firmware && pio run -e wokwi_sync_test
   prototype for home/personal-scale deployment, not a hardened multi-tenant
   product).
 - `docs/setup-pi.md` — walkthrough for provisioning the Raspberry Pi print
-  server, configuring the physical printer in CUPS, and pairing a device.
+  server (Docker Compose, the recommended path, or a manual systemd
+  install), configuring the physical printer in CUPS, and pairing a
+  device.
 - `docs/setup-x4.md` — building/flashing the firmware and provisioning the
   X4's SD card for first boot.
 - `docs/xtc-format.md` — the XTC/XTG byte-layout subset this project

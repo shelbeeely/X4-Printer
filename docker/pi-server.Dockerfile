@@ -1,12 +1,21 @@
-# Containerized pi-server for local dev/testing (docker-compose.test.yml)
-# and for exercising printer_forward.py's real `lp` shell-out against a
-# real CUPS daemon (docker/cups/) instead of the fake `lp` the unit/
-# integration test suites use everywhere else -- see docs/testing.md.
+# Same image, two jobs:
+#   1. The recommended production deployment (see docker-compose.yml at
+#      the repo root and docs/setup-pi.md) -- replaces the Python venv +
+#      systemd unit from install/xteink-print-server.service. CUPS and
+#      avahi-daemon still run on the HOST, not in this container (see
+#      install/docker-host-setup.sh's header comment for why) -- this
+#      image is only ever "run the Python app" now, same as it always was.
+#   2. Local dev/testing (docker-compose.test.yml) and exercising
+#      printer_forward.py's real `lp` shell-out against a real CUPS daemon
+#      (docker/cups/) instead of the fake `lp` the unit/integration test
+#      suites use everywhere else -- see docs/testing.md.
 #
-# This is NOT the deployment story: real installs are a bare Raspberry Pi
-# running the systemd unit in install/ (see docs/setup-pi.md) -- a Pi Zero
-# W's 512MB RAM is already shared with CUPS/avahi/the OS, so this project
-# deliberately has no container runtime in its actual deployment path.
+# Note for a genuine Raspberry Pi Zero W: 512MB RAM is already shared with
+# CUPS/avahi/the OS, and Docker itself (dockerd/containerd, image layers)
+# is real overhead on top of that -- see docs/setup-pi.md's callout. If
+# RAM is tight on your specific hardware, docs/setup-pi.md's "Manual
+# install (no Docker)" section avoids it entirely; on a Pi 3/4/5 this is a
+# non-issue.
 FROM python:3.11-slim-bookworm
 
 # cups-client provides `lp`/`lpstat`, the CUPS client CLI printer_forward.py
@@ -24,10 +33,13 @@ RUN pip install --no-cache-dir -r requirements.txt pytest
 
 COPY pi-server/xteink_print_server ./xteink_print_server
 COPY pi-server/tools ./tools
+COPY docker/pi-server-entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 ENV XTEINK_DATA_DIR=/data
 VOLUME ["/data"]
 
 EXPOSE 6310 8443 8090
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "-m", "xteink_print_server.server"]

@@ -70,11 +70,15 @@ automated anywhere — see "Known gaps" at the end of this document for why.
 ## Docker: real-CUPS integration (`docker-cups-tests`)
 
 `docker-compose.test.yml` builds three images (`docker/pi-server.Dockerfile`,
-`docker/relay.Dockerfile`, `docker/cups/Dockerfile`) — **local dev/testing
-only**, not the deployment story (a real install is a bare Raspberry Pi
-under systemd, see `docs/setup-pi.md`; a Pi Zero W's 512MB RAM is already
-shared with CUPS/avahi/the OS, so this project has no container runtime in
-its actual deployment path).
+`docker/relay.Dockerfile`, `docker/cups/Dockerfile`) for **local dev/
+testing only** — this is a separate file from the production
+`docker-compose.yml` at the repo root (see `docs/setup-pi.md`'s "Docker
+install" section), which reuses the same `docker/pi-server.Dockerfile`
+image but talks to a real CUPS already configured on the host instead of
+spinning up a throwaway CUPS container. Note for a genuine Pi Zero W:
+512MB RAM is already shared with CUPS/avahi/the OS, and Docker's own
+overhead is real on top of that — `docs/setup-pi.md` covers a manual
+(no-Docker) systemd install as the alternative for that specific case.
 
 `docker/cups/` is a real CUPS daemon with a virtual "PDF" printer
 (`printer-driver-cups-pdf`, writes finished jobs to `/output` instead of a

@@ -48,6 +48,7 @@ the exact wire contract between the three components.
 | `relay/` | Optional lightweight cloud relay for approving prints away from home (metadata only, never document bytes) |
 | `tools/simulate_x4.py` | A fake X4 that speaks the real sync protocol, for exercising the whole pipeline without hardware |
 | `tests/integration/` | End-to-end tests running real server instances against the fake X4 client |
+| `docker-compose.yml`, `docker/pi-server.Dockerfile` | Recommended production deployment for `pi-server` — see `docs/setup-pi.md` |
 | `docker/`, `docker-compose.test.yml`, `tests/docker/` | Local dev/test-only containers — real CUPS integration testing, see `docs/testing.md` |
 | `firmware/test/wokwi_sync/` | Wokwi ESP32-C3 simulation harness for the on-device sync stack, see `docs/testing.md` |
 | `docs/` | Architecture, protocol, format, setup, and testing documentation |
@@ -61,9 +62,11 @@ one-time manual step).
 
 ## Quick start
 
-1. **Pi**: `cd pi-server && sudo ./install/install.sh` — see
-   `docs/setup-pi.md` for the full walkthrough (configuring your physical
-   printer in CUPS, pairing a device).
+1. **Pi**: `sudo ./pi-server/install/docker-host-setup.sh && cp .env.example
+   .env && docker compose up -d --build` — see `docs/setup-pi.md` for the
+   full walkthrough (configuring your physical printer in CUPS, pairing a
+   device) and its "Manual install (no Docker)" section for a bare-metal
+   systemd alternative.
 2. **X4**: `git submodule update --init firmware/freeink-sdk && cd firmware
    && pio run -e xteink_x4 -t upload` — see `docs/setup-x4.md` for SD card
    provisioning and first boot.
@@ -128,6 +131,15 @@ against a real `pi-server` instance.
   length instead of the shorter 480px one. Toggle per-document from the
   reader's action menu; no format or firmware-rendering change needed to
   support it. See `docs/architecture.md` "Landscape-strip reading mode".
+- **Doubles as a low-key calendar status display.** With no print jobs
+  waiting, the Inbox screen shows your next upcoming event instead —
+  synced in the same wake window as print jobs, no separate radio time
+  — with optional wake-before-start / wake-at-end reminders (Settings >
+  Calendar). Calendar feeds (and Wi-Fi networks) can be managed centrally
+  from the Pi's admin console and pushed to every paired device, no SD
+  card round-trip needed. Not trying to be a full [Busy
+  Bar](https://busy.app/) — just a battery-friendly, always-on e-paper
+  glance at what's next.
 - **The relay never needs your documents.** It carries device/job IDs,
   actions, and timestamps — never the original file or the XTC preview
   (opt-in exception documented in `docs/relay.md`), and neither the Pi nor
