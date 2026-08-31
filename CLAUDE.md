@@ -67,6 +67,22 @@ cd firmware && pio run -e xteink_x4 -t upload   # flash
 No lint or CI commands exist in this repository as of this writing — don't
 invent or assume them.
 
+Two additional, slower test layers exist beyond the four commands above —
+see `docs/testing.md` for what each does and how to run it:
+
+```sh
+# Real-CUPS integration test (Docker Compose: pi-server + relay + a real
+# CUPS daemon with a virtual PDF-backed printer)
+docker compose -f docker-compose.test.yml build cups pi-server
+docker compose -f docker-compose.test.yml up -d cups   # wait for it to report healthy
+docker compose -f docker-compose.test.yml run --rm pi-server python -m pytest tests_docker -q
+docker compose -f docker-compose.test.yml down -v
+
+# Wokwi ESP32-C3 simulation of the real on-device sync stack (best-effort,
+# needs a WOKWI_CLI_TOKEN — see docs/testing.md before relying on this)
+cd firmware && pio run -e wokwi_sync_test
+```
+
 ## Invariants
 
 - **Atomic durable writes.** Every durable write — Pi-side SQLite
@@ -113,6 +129,10 @@ invent or assume them.
 
 ## Docs map
 
+- `docs/testing.md` — every test layer in this repo (unit, integration,
+  firmware host tests, the Docker real-CUPS integration test, the
+  best-effort Wokwi on-device sync simulation), how to run each, and
+  what's still a known gap.
 - `docs/architecture.md` — full system design: component responsibilities,
   reference-project attribution and departures, SQLite data model,
   idempotent-approval transaction, wake/sleep sequence, memory budget,

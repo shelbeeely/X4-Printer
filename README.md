@@ -48,7 +48,9 @@ the exact wire contract between the three components.
 | `relay/` | Optional lightweight cloud relay for approving prints away from home (metadata only, never document bytes) |
 | `tools/simulate_x4.py` | A fake X4 that speaks the real sync protocol, for exercising the whole pipeline without hardware |
 | `tests/integration/` | End-to-end tests running real server instances against the fake X4 client |
-| `docs/` | Architecture, protocol, format, and setup documentation |
+| `docker/`, `docker-compose.test.yml`, `tests/docker/` | Local dev/test-only containers — real CUPS integration testing, see `docs/testing.md` |
+| `firmware/test/wokwi_sync/` | Wokwi ESP32-C3 simulation harness for the on-device sync stack, see `docs/testing.md` |
+| `docs/` | Architecture, protocol, format, setup, and testing documentation |
 
 ## Docs & flashing
 
@@ -93,7 +95,13 @@ cd firmware/test && cmake -B build && cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-All four suites are green in this repository as committed.
+The four suites above are green in this repository as committed and are
+what "the tests" means day to day. Two more, slower layers exist for
+deeper coverage and are documented separately in **`docs/testing.md`**:
+a Docker Compose stack that runs `printer_forward.py`'s `lp` call against
+a real CUPS daemon instead of a fake one, and a best-effort Wokwi
+ESP32-C3 simulation that runs the real on-device Wi-Fi/sync firmware
+against a real `pi-server` instance.
 
 ## Design highlights
 

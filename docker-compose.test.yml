@@ -1,0 +1,49 @@
+# Local dev/testing stack -- NOT the deployment story (see docs/setup-pi.md:
+# a real install is a bare Raspberry Pi under systemd). This exists for two
+# things: running pi-server/relay in a consistent container instead of a
+# host venv, and -- the part that actually adds new coverage -- letting
+# printer_forward.py's `lp` shell-out hit a real CUPS daemon (docker/cups/)
+# instead of the fake `lp` every other test in this repo uses. See
+# docs/testing.md.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d --build cups
+#   docker compose -f docker-compose.test.yml run --rm pi-server \
+#     python -m pytest tests_docker -q
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  cups:
+    build:
+      context: .
+      dockerfile: docker/cups/Dockerfile
+    volumes:
+      - cups-output:/output
+    healthcheck:
+      test: ["CMD", "lpstat", "-h", "localhost:631", "-p", "PDF"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  pi-server:
+    build:
+      context: .
+      dockerfile: docker/pi-server.Dockerfile
+    environment:
+      CUPS_SERVER: cups
+      XTEINK_CUPS_QUEUE: PDF
+      XTEINK_LP_BINARY: lp
+    depends_on:
+      cups:
+        condition: service_healthy
+    volumes:
+      - cups-output:/output:ro
+      - ./tests/docker:/app/tests_docker:ro
+
+  relay:
+    build:
+      context: .
+      dockerfile: docker/relay.Dockerfile
+
+volumes:
+  cups-output:
