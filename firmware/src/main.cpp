@@ -20,6 +20,8 @@
 #include <SDCardManager.h>
 
 #include "config/AppSettings.h"
+#include "config/CalendarCache.h"
+#include "config/CalendarConfig.h"
 #include "config/DeviceConfig.h"
 #include "config/WifiStore.h"
 #include "power/SleepManager.h"
@@ -52,6 +54,7 @@ store::JobIndex jobIndex;
 store::ApprovalOutboxIndex outboxIndex;
 config::DeviceConfigData deviceConfig;
 config::AppSettingsData appSettings;
+config::NextEventInfo nextEvent;
 
 uint32_t lastActivityMs = 0;
 
@@ -59,6 +62,14 @@ void runSyncPass() {
   syncmgr::SyncManager manager(deviceConfig, jobIndex, outboxIndex);
   uiState.lastSyncSummary = manager.runFullSync();
   uiState.hasSyncedOnce = true;
+  // SyncManager::runFullSync() writes a fresh calendar::syncCalendars()
+  // result straight to config::CalendarCache's singleton (see
+  // sync/SyncManager.cpp) -- re-read it into main.cpp's copy so the
+  // Inbox screen picks up this wake's sync immediately rather than only
+  // after the next reboot, same reason deviceConfig/appSettings are
+  // local copies of their own singletons instead of reaching the
+  // singleton directly from ui/InboxUI.cpp.
+  nextEvent = config::CalendarCache::instance().data();
 }
 
 void goToSleep() {
@@ -113,6 +124,9 @@ void setup() {
   config::WifiStore::instance().load();
   config::AppSettings::instance().load();
   appSettings = config::AppSettings::instance().data();
+  config::CalendarConfig::instance().load();
+  config::CalendarCache::instance().load();
+  nextEvent = config::CalendarCache::instance().data();
 
   store::loadJobIndex(jobIndex);
   store::loadApprovalOutbox(outboxIndex);
@@ -121,6 +135,7 @@ void setup() {
   uiState.outbox = &outboxIndex;
   uiState.deviceConfig = &deviceConfig;
   uiState.appSettings = &appSettings;
+  uiState.nextEvent = &nextEvent;
   uiState.framebuffer = display.getFrameBuffer();
   uiState.framebufferSize = display.getBufferSize();
   uiState.panelWidth = display.getDisplayWidth();

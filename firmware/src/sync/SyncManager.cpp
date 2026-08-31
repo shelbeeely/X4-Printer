@@ -3,14 +3,34 @@
 #include <Arduino.h>
 
 #include <cstring>
+#include <ctime>
 
+#include "calendar/CalendarSync.h"
+#include "config/CalendarConfig.h"
 #include "net/WifiManager.h"
 
 namespace syncmgr {
 
 namespace {
 constexpr size_t kSyncBatchSize = 16;
+
+// This firmware never anchors its clock any other way (no battery-backed
+// RTC chip, and deep sleep only keeps a running *elapsed-time* counter,
+// not an absolute one) -- calendar/CalendarSync.cpp needs a real wall-
+// clock "now" to compute a meaningful RRULE window against, so this is
+// called once per wake, while Wi-Fi is already connected for job sync,
+// before that sync runs. Bounded: a network that can reach the Pi but not
+// an NTP pool (unusual, but not impossible on a locked-down network)
+// degrades to "skip calendar sync this wake" (see kMinPlausibleNow in
+// CalendarSync.cpp) rather than blocking job sync indefinitely.
+void syncClock() {
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  const uint32_t deadline = millis() + 5000;
+  while (time(nullptr) < 1700000000 && millis() < deadline) {
+    delay(100);
+  }
 }
+}  // namespace
 
 SyncSummary SyncManager::runFullSync() {
   SyncSummary summary;
@@ -37,6 +57,14 @@ SyncSummary SyncManager::runFullSync() {
   if (summary.approvalsSynced > 0) {
     downloadPendingJobs(client, summary);
   }
+
+  // Calendar sync (docs/architecture.md's idle-screen "next event" widget,
+  // ui/InboxUI.cpp) rides this same connected window rather than opening
+  // a second one -- runs after the print-inbox sync above, which is this
+  // project's actual purpose, so a slow/unreachable calendar feed can
+  // never delay it.
+  syncClock();
+  calendar::syncCalendars(config::CalendarConfig::instance());
 
   wifi.disconnect();
   return summary;

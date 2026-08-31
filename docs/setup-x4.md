@@ -36,6 +36,7 @@ root (all written by tools on the Pi, then copied over — see
 /system/pi_ca.pem        <- pi-server's tls/server.crt (pinned CA for the sync API)
 /system/wifi.json        <- see below
 /system/relay_ca.pem     <- optional, only if you're pinning the relay's cert (docs/relay.md)
+/system/calendars.json   <- optional, see "Calendar idle screen" below
 /inbox/                  <- created automatically; downloaded XTC files + index.json
 ```
 
@@ -63,6 +64,40 @@ base64) the first time it saves the store, so after first boot you can
 overwrite this plaintext version on the card if you'd rather not leave it
 readable — see `firmware/src/config/WifiStore.h` for exactly what
 protection that obfuscation does and doesn't provide.
+
+### Calendar idle screen (optional)
+
+When the inbox has no jobs to review, the Inbox screen shows your next
+upcoming calendar event instead of a plain "Inbox empty" message — synced
+during the same wake/Wi-Fi window as print jobs, never a separate radio
+window (see `firmware/src/calendar/CalendarSync.cpp`). Opt in by creating
+`/system/calendars.json` by hand — same "no tool writes this yet, and no
+on-device UI to add one either, since it'd need typing a URL" story as
+`wifi.json` above:
+
+```json
+{
+  "calendars": [
+    {"url": "https://calendar.google.com/calendar/ical/.../basic.ics", "label": "Home"}
+  ]
+}
+```
+
+(Google Calendar → Settings → Settings for my calendars → *Integrate
+calendar* → "Secret address in iCal format".) Up to
+`config::kMaxCalendars` (4) feeds; `label` is optional and currently
+unused (reserved for a future multi-calendar view). Omit the file, or
+leave it empty, to leave the plain "Inbox empty" message in place.
+
+**Known limitation: times shown are UTC, not your local time.** This
+firmware has no timezone configuration (no Settings picker, no TZ env
+var) — it syncs an absolute clock via NTP each wake
+(`sync/SyncManager.cpp`'s `syncClock()`) but always displays and computes
+in UTC. An event's own TZID (from the ICS feed) still resolves correctly
+against that absolute clock (see `firmware/src/calendar/IcsParser.h`'s
+timezone-model comment) — only the *display* and *device-local* dates
+(all-day events, TZID-less times) are UTC. A local-timezone Settings
+option is a reasonable follow-up, not implemented yet.
 
 Insert the card into the X4.
 

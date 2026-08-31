@@ -24,6 +24,7 @@
 #include <FreeInkApp.h>
 
 #include "config/AppSettings.h"
+#include "config/CalendarCache.h"
 #include "config/DeviceConfig.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
@@ -73,6 +74,10 @@ struct InboxUiState {
   // (config::AppSettings::instance().data(), wired by main.cpp) and saves
   // via config::AppSettings::instance().save() on change.
   config::AppSettingsData* appSettings = nullptr;
+  // Refreshed by main.cpp's runSyncPass() after every sync pass (see that
+  // function's comment) -- the Inbox screen's idle state reads this when
+  // there are no print jobs to review. Read-only from the UI's side.
+  const config::NextEventInfo* nextEvent = nullptr;
 
   // On-device web UI (ui/WebUiServer.h) — see docs/architecture.md
   // "On-device Web UI". A plain member (not a pointer): its own

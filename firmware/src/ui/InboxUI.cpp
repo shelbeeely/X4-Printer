@@ -118,6 +118,37 @@ void buildInboxListItems(const store::JobIndex& jobs, freeink::ui::ListItem* ite
   }
 }
 
+// Shown in place of the job list when the inbox is empty -- the wakeink-
+// style idle screen: the cached next calendar event (config::CalendarCache,
+// refreshed every sync pass -- see sync/SyncManager.cpp's calendar sync
+// call and main.cpp's runSyncPass()) if one is configured and known,
+// otherwise the plain "print something" message this screen always showed
+// before calendar support existed.
+//
+// Known limitation: this firmware never configures a timezone (no NTP-
+// synced offset, no TZ env var -- see sync/SyncManager.cpp's syncClock()),
+// so times shown here are UTC, not the user's local time.
+const char* idleScreenMessage(const InboxUiState& state) {
+  static char body[192];
+  if (state.nextEvent == nullptr || !state.nextEvent->hasEvent) {
+    return "Inbox empty. Print something from any computer on your network, then wake this device.";
+  }
+
+  struct tm tmv;
+  time_t start = state.nextEvent->start;
+  gmtime_r(&start, &tmv);  // global, not std:: -- this file includes <time.h>, not <ctime>
+  char timeStr[48];
+  if (state.nextEvent->allDay) {
+    strftime(timeStr, sizeof(timeStr), "%a %b %d (all day, UTC)", &tmv);
+  } else {
+    strftime(timeStr, sizeof(timeStr), "%a %b %d, %H:%M UTC", &tmv);
+  }
+
+  std::snprintf(body, sizeof(body), "Next: %s\n%s\n\nInbox empty. Print something to see it here.",
+                state.nextEvent->title, timeStr);
+  return body;
+}
+
 void homeScreen(App::ScreenType& screen, void* userPtr) {
   auto& state = *static_cast<InboxUiState*>(userPtr);
 
@@ -165,7 +196,7 @@ void homeScreen(App::ScreenType& screen, void* userPtr) {
   screen.footer(footer, 4);
 
   if (count == 0) {
-    screen.popup("Inbox empty. Print something from any computer on your network, then wake this device.");
+    screen.popup(idleScreenMessage(state));
   } else {
     screen.list(items, count, selectedRow, ActionOpenJob);
   }
