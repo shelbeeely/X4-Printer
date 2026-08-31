@@ -54,22 +54,67 @@ const char* statusGlyph(store::JobStatus status) {
   return " ";
 }
 
-// Builds the list rows shown on the Inbox screen. Deleted jobs are hidden
-// (they still exist on disk pending sync/retention, see
-// docs/architecture.md's data model) but everything else is visible so the
-// user can see what's already been actioned, not just what's new.
-void buildInboxListItems(const store::JobIndex& jobs, freeink::ui::ListItem* items, size_t maxItems, size_t& outCount,
-                          char (*labelBuf)[80]) {
+// Section ordering for the Inbox list -- New (unreviewed) first since
+// that's the reason the device woke up, then the two "already decided,
+// still on SD pending sync" states so the user can see what's queued
+// without hunting for it in one flat, unordered list. ApprovedDelete stays
+// hidden entirely (unchanged from before this grouping): those jobs still
+// exist on disk pending sync/retention (docs/architecture.md's data
+// model), but there's nothing left for the user to do with them.
+struct JobSection {
+  const char* header;
+  store::JobStatus status;
+};
+constexpr JobSection kJobSections[] = {
+    {"New", store::JobStatus::Downloaded},
+    {"To Print", store::JobStatus::ApprovedPrint},
+    {"Kept", store::JobStatus::ApprovedKeep},
+};
+constexpr size_t kJobSectionCount = sizeof(kJobSections) / sizeof(kJobSections[0]);
+
+// items[]/labelBuf[] must have room for kMaxInboxJobs real rows PLUS
+// kJobSectionCount header rows (see the caller's array sizing) -- maxJobs
+// caps only the real-job count (kMaxInboxJobs), independent of that larger
+// physical capacity, so the header insertion below always has room.
+//
+// Builds the list rows shown on the Inbox screen, grouped into section
+// headers by status (see kJobSections) -- FreeInkUI's list component skips
+// header rows for focus/selection natively (ListItem::isHeader: "never
+// selected or focused"), so no extra bookkeeping is needed here to keep
+// keyboard/button navigation moving between real rows only. A section with
+// no jobs in it is omitted entirely rather than shown empty.
+void buildInboxListItems(const store::JobIndex& jobs, freeink::ui::ListItem* items, size_t maxJobs, size_t& outCount,
+                          char (*labelBuf)[80], char (*headerBuf)[24]) {
   outCount = 0;
-  for (size_t i = 0; i < jobs.count() && outCount < maxItems; i++) {
-    const store::JobEntry& e = jobs.at(i);
-    if (e.status == store::JobStatus::ApprovedDelete) continue;
-    std::snprintf(labelBuf[outCount], 80, "[%s] %s (%u pg)", statusGlyph(e.status), e.title,
-                  static_cast<unsigned>(e.pageCount));
-    items[outCount] = freeink::ui::ListItem{};
-    items[outCount].label = labelBuf[outCount];
-    items[outCount].actionValue = static_cast<int32_t>(i);
+  size_t headerSlot = 0;
+  size_t jobsAdded = 0;
+  for (size_t s = 0; s < kJobSectionCount; s++) {
+    size_t sectionStart = outCount;
+    for (size_t i = 0; i < jobs.count() && jobsAdded < maxJobs; i++) {
+      const store::JobEntry& e = jobs.at(i);
+      if (e.status != kJobSections[s].status) continue;
+      std::snprintf(labelBuf[outCount], 80, "[%s] %s (%u pg)", statusGlyph(e.status), e.title,
+                    static_cast<unsigned>(e.pageCount));
+      items[outCount] = freeink::ui::ListItem{};
+      items[outCount].label = labelBuf[outCount];
+      items[outCount].actionValue = static_cast<int32_t>(i);
+      outCount++;
+      jobsAdded++;
+    }
+    if (outCount == sectionStart) continue;  // nothing in this section -- skip its header too
+
+    std::snprintf(headerBuf[headerSlot], 24, "%s (%zu)", kJobSections[s].header, outCount - sectionStart);
+    // Shift this section's rows down one slot and insert the header at
+    // sectionStart -- simpler than a second pass since sections are small
+    // (kMaxInboxJobs total across all of them) and this only runs once per
+    // render, not per frame of an animation.
+    for (size_t i = outCount; i > sectionStart; i--) items[i] = items[i - 1];
+    items[sectionStart] = freeink::ui::ListItem{};
+    items[sectionStart].label = headerBuf[headerSlot];
+    items[sectionStart].actionValue = -1;  // sentinel: never a real job index
+    items[sectionStart].isHeader = true;
     outCount++;
+    headerSlot++;
   }
 }
 
@@ -85,18 +130,30 @@ void homeScreen(App::ScreenType& screen, void* userPtr) {
   }
   screen.header("Print Inbox", subtitle);
 
-  static freeink::ui::ListItem items[store::kMaxInboxJobs];
+  static freeink::ui::ListItem items[store::kMaxInboxJobs + kJobSectionCount];
   static char labels[store::kMaxInboxJobs][80];
+  static char headers[kJobSectionCount][24];
   size_t count = 0;
-  buildInboxListItems(*state.jobs, items, store::kMaxInboxJobs, count, labels);
+  buildInboxListItems(*state.jobs, items, store::kMaxInboxJobs, count, labels, headers);
 
-  if (state.selectedJobIndex < 0 && count > 0) state.selectedJobIndex = items[0].actionValue;
+  // Pick the row matching state.selectedJobIndex; if there isn't one (first
+  // render, or the previously selected job is gone), fall back to the
+  // first real row -- never a header (actionValue=-1 sentinel, and headers
+  // aren't focusable anyway).
   int16_t selectedRow = 0;
-  for (size_t i = 0; i < count; i++) {
+  int16_t firstRealRow = -1;
+  bool found = false;
+  for (size_t i = 0; i < count && !found; i++) {
+    if (items[i].isHeader) continue;
+    if (firstRealRow < 0) firstRealRow = static_cast<int16_t>(i);
     if (items[i].actionValue == state.selectedJobIndex) {
       selectedRow = static_cast<int16_t>(i);
-      break;
+      found = true;
     }
+  }
+  if (!found && firstRealRow >= 0) {
+    selectedRow = firstRealRow;
+    state.selectedJobIndex = items[firstRealRow].actionValue;
   }
 
   const freeink::ui::FooterAction footer[] = {
