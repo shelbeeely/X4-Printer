@@ -33,7 +33,15 @@ services:
       context: .
       dockerfile: docker/pi-server.Dockerfile
     environment:
-      CUPS_SERVER: cups
+      # /version=1.1 is load-bearing, not decorative: without it CUPS
+      # client tools (lpstat/lp) reaching this cupsd cross-container fail
+      # with "Error - add '/version=1.1' to server name." on every
+      # command -- a real IPP version-negotiation quirk diagnosed via a
+      # dedicated CI step that queried from inside this exact container
+      # (see git history on this file / docker/cups/entrypoint.sh for how
+      # many other things got ruled out first). printer_forward.py never
+      # passes `-h` itself, so this env var is the only place to fix it.
+      CUPS_SERVER: cups/version=1.1
       XTEINK_CUPS_QUEUE: PDF
       XTEINK_LP_BINARY: lp
     depends_on:
