@@ -33,15 +33,22 @@ services:
       context: .
       dockerfile: docker/pi-server.Dockerfile
     environment:
-      # /version=1.1 is load-bearing, not decorative: without it CUPS
-      # client tools (lpstat/lp) reaching this cupsd cross-container fail
-      # with "Error - add '/version=1.1' to server name." on every
-      # command -- a real IPP version-negotiation quirk diagnosed via a
-      # dedicated CI step that queried from inside this exact container
-      # (see git history on this file / docker/cups/entrypoint.sh for how
-      # many other things got ruled out first). printer_forward.py never
-      # passes `-h` itself, so this env var is the only place to fix it.
-      CUPS_SERVER: cups/version=1.1
+      # KNOWN BROKEN as of this writing -- see docs/testing.md's
+      # "Docker: real-CUPS integration" section before touching this again.
+      # Cross-container lpstat/lp against $CUPS_SERVER fails with
+      # "Error - add '/version=1.1' to server name." regardless of whether
+      # that suffix is actually present in the value (tested both ways with
+      # identical results), which rules out real IPP-version-negotiation as
+      # the cause -- it's CUPS's generic fallback message for something
+      # else. cupsd itself, cupsctl, and lpadmin all work correctly (see
+      # docker/cups/entrypoint.sh's own -h localhost:631 calls, and its
+      # printer-is-shared=true), so this is specifically about the
+      # CROSS-CONTAINER connection, not the daemon's own config. Needs a
+      # human with real `docker compose` access (packet capture or
+      # `cupsd -f` verbose logging) to get further -- CI's log-only feedback
+      # loop has been exhausted on this one (see this file's and
+      # entrypoint.sh's git history for the 7 attempts that got this far).
+      CUPS_SERVER: cups
       XTEINK_CUPS_QUEUE: PDF
       XTEINK_LP_BINARY: lp
     depends_on:

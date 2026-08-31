@@ -104,6 +104,44 @@ didn't (Debian package behavior can drift across releases); if this job
 ever fails at the "cups container never became healthy" step, that
 fallback and its PPD auto-detection is the first place to look.
 
+### Known broken: cross-container `lp`/`lpstat` — `continue-on-error: true`
+
+**As of this writing, `docker-cups-tests` does not pass.** Everything
+*inside* the `cups` container works correctly and is confirmed by CI on
+every run: `cupsd` starts, `cupsctl`/`lpadmin` succeed (both had to be
+routed over `-h localhost:631` instead of the default local domain socket
+— see `docker/cups/entrypoint.sh`'s header comment for that whole saga),
+the "PDF" queue is created, shared (`printer-is-shared=true`), enabled, and
+`lpstat -h localhost:631 -p PDF` reports it idle. The healthcheck passes.
+
+What doesn't work: the **`pi-server`** container, submitting cross-container
+via `$CUPS_SERVER=cups`, gets `lpstat: Error - add '/version=1.1' to
+server name.` on every single CUPS client call — `lpstat -h "$CUPS_SERVER"
+-t`, `lpstat -h cups:631 -t`, all of it. DNS resolution is fine
+(`getent hosts cups` correctly returns the container's real address). The
+obvious reading of that error text — that the client needs an explicit
+`/version=1.1` suffix — was tried and **disproved**: setting
+`CUPS_SERVER=cups/version=1.1` produced the byte-for-byte identical error,
+which means it's CUPS's generic fallback message for some other failure
+condition, not an actual missing-version-suffix problem. Something about
+this specific cross-container path is different from every local
+(`-h localhost:631`, from inside the same container) call this project has
+gotten to work reliably.
+
+Seven iterations got this far (see the git history on `docker-compose.test.yml`
+and `docker/cups/entrypoint.sh` for the full trail — a kill/restart race, a
+`cupsd -f &` job-control quirk, local-domain-socket auth, an unshared
+queue, and finally this) before hitting a wall CI's log-only feedback loop
+can't get past: **the next step needs a human with real `docker compose`
+access** — a packet capture between the containers, or running `cupsd -f`
+with verbose IPP logging (`LogLevel debug` in `cupsd.conf`) and watching
+what the server actually receives (or doesn't) from the `pi-server`
+container's connection attempt. Until then this job is
+`continue-on-error: true` in `.github/workflows/tests.yml` so it doesn't
+block the rest of CI, but it still runs on every push — if it ever goes
+green on its own (a CUPS/Debian package update, say), delete this section
+and the `continue-on-error` line together.
+
 ## Wokwi: on-device sync smoke test (`wokwi-sync-smoke-test`) — best-effort
 
 **This is the one piece of testing infrastructure in this repo that has
