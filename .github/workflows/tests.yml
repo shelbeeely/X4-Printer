@@ -196,6 +196,20 @@ jobs:
       - name: Run tests/docker against the real CUPS daemon
         run: docker compose -f docker-compose.test.yml run --rm pi-server python -m pytest tests_docker -q
 
+      - name: Diagnose from the pi-server container's own vantage point (always run)
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml run --rm --entrypoint sh pi-server -c '
+            echo "CUPS_SERVER=$CUPS_SERVER";
+            echo "--- getent hosts cups ---"; getent hosts cups || true;
+            echo "--- lpstat -h \$CUPS_SERVER -t (bare CUPS_SERVER, as lp itself would use it) ---";
+            lpstat -h "$CUPS_SERVER" -t || true;
+            echo "--- lpstat -h cups:631 -t (explicit host:port) ---";
+            lpstat -h cups:631 -t || true;
+            echo "--- lpstat -h cups:631 -p PDF -l (long status) ---";
+            lpstat -h cups:631 -p PDF -l || true;
+          '
+
       - name: Show cups container logs (diagnostics, always run)
         if: always()
         run: docker compose -f docker-compose.test.yml logs cups
