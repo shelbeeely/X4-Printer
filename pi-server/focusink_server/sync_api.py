@@ -18,6 +18,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlsplit
 
 from .config import Config
+from .convert import ConversionError, ingest_document
 from .db import Database
 from .printer_forward import apply_approval
 from .util import constant_time_eq, hash_token, serve_with_optional_tls
@@ -26,6 +27,21 @@ logger = logging.getLogger("focusink.sync_api")
 
 MAX_APPROVAL_BODY_BYTES = 8192
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
+
+# Direct-upload endpoint (docs/protocol.md §1.7): a phone-picked photo can
+# legitimately run into the low tens of megabytes -- far larger than an
+# approval envelope, but still bounded so a buggy/malicious client can't
+# make this server buffer an unbounded body in RAM (this handler reads the
+# whole body at once, unlike download_xtc's own chunked streaming, since
+# convert.ingest_document needs the complete bytes to hand PyMuPDF/PIL).
+MAX_UPLOAD_BODY_BYTES = 20 * 1024 * 1024
+
+# Scoped narrower than convert.SUPPORTED_MIME_TYPES (which also allows PDF
+# and other IPP-sourced formats) -- the on-device WASM converter that feeds
+# this endpoint only ever produces/forwards these two (docs/architecture.md
+# direct-upload section: "images only (JPEG/PNG) for v1"), so anything else
+# here is either a client bug or someone probing the endpoint directly.
+UPLOAD_MIME_TYPES = {"image/jpeg", "image/png"}
 
 
 class SyncApiHandler(BaseHTTPRequestHandler):
@@ -110,6 +126,8 @@ class SyncApiHandler(BaseHTTPRequestHandler):
             self._handle_ack(rest[1])
         elif len(rest) == 1 and rest[0] == "approvals":
             self._handle_approval()
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "jobs":
+            self._handle_upload_original(rest[1], rest[3], parsed.query)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -307,6 +325,49 @@ class SyncApiHandler(BaseHTTPRequestHandler):
                 "error": result.error,
             },
         )
+
+    def _handle_upload_original(self, path_device_id: str, job_id: str, query: str) -> None:
+        """docs/protocol.md §1.7: a locally-created job's original image
+        bytes, uploaded directly by the X4 (SyncManager.uploadPendingOriginals())
+        under the same job_id it already has a Print/Keep/Delete approval
+        queued against in its ApprovalOutbox -- see docs/architecture.md's
+        direct-upload section for why that ordering means no new code is
+        needed on the approval-apply side once this row exists."""
+        device_id = self._authenticate()
+        if device_id is None:
+            return
+        if device_id != path_device_id:
+            self._send_json(403, {"error": "device id mismatch"})
+            return
+
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > MAX_UPLOAD_BODY_BYTES:
+            self._send_json(413, {"error": "invalid or too large body"})
+            return
+
+        mime = (self.headers.get("Content-Type") or "").strip()
+        if mime not in UPLOAD_MIME_TYPES:
+            self._send_json(400, {"error": f"unsupported mime {mime!r}"})
+            return
+
+        title = (parse_qs(query).get("title", [""])[0] or "").strip() or "Untitled"
+
+        document = self.rfile.read(length)
+        if len(document) != length:
+            self._send_json(400, {"error": "short body"})
+            return
+
+        try:
+            stored_id, is_new = ingest_document(
+                self.config, self.db, document_bytes=document, mime=mime, title=title, source="x4_upload",
+                job_id=job_id,
+            )
+        except ConversionError as exc:
+            logger.error("direct-upload conversion failed for job %r: %s", title, exc)
+            self._send_json(400, {"error": f"conversion failed: {exc}"})
+            return
+
+        self._send_json(200, {"job_id": stored_id, "status": "created" if is_new else "already_exists"})
 
 
 class SyncApiServer(ThreadingHTTPServer):

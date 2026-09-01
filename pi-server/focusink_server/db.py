@@ -40,7 +40,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     xtc_landscape_path TEXT NOT NULL DEFAULT '',
     xtc_landscape_bytes INTEGER NOT NULL DEFAULT 0,
     xtc_landscape_sha256 TEXT NOT NULL DEFAULT '',
-    xtc_landscape_page_count INTEGER NOT NULL DEFAULT 0
+    xtc_landscape_page_count INTEGER NOT NULL DEFAULT 0,
+    -- Set by claim_job_for_finalization() to the device-originated print
+    -- approval_id that "owns" this job's print outcome, closing the
+    -- multi-device duplicate-print gap: two different devices'
+    -- independent print approvals for the same job_id must never both
+    -- invoke submit_to_cups(). See printer_forward._finish() and
+    -- docs/architecture.md "Idempotent approval application".
+    finalizing_approval_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_deliveries (
@@ -132,6 +139,7 @@ class Database:
             _ensure_column(conn, "jobs", "xtc_landscape_bytes", "INTEGER NOT NULL DEFAULT 0")
             _ensure_column(conn, "jobs", "xtc_landscape_sha256", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "jobs", "xtc_landscape_page_count", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(conn, "jobs", "finalizing_approval_id", "TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn"):
@@ -187,17 +195,26 @@ class Database:
         xtc_landscape_bytes: int = 0,
         xtc_landscape_sha256: str = "",
         xtc_landscape_page_count: int = 0,
-    ) -> str:
-        job_id = uuid.uuid4().hex
+        job_id: Optional[str] = None,
+    ) -> tuple[str, bool]:
+        """Inserts a new job row. `job_id` defaults to a fresh uuid4 (the
+        IPP path's existing behavior, unchanged) — pass an explicit one for
+        an X4-generated id (convert.ingest_document's x4_upload source), so
+        a retried upload (dropped connection after the Pi already ingested
+        it) becomes a cheap no-op via INSERT OR IGNORE rather than a
+        duplicate row. Returns (job_id, is_new) — same shape as
+        record_approval_if_new's own idempotency pattern; is_new is always
+        True when job_id is None, since a fresh uuid4 never collides."""
+        resolved_id = job_id or uuid.uuid4().hex
         with self.transaction() as conn:
-            conn.execute(
-                """INSERT INTO jobs
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO jobs
                    (job_id, title, created_at, source, original_path, original_mime,
                     original_bytes, xtc_path, xtc_bytes, xtc_sha256, page_count, status, thumbnail_path,
                     xtc_landscape_path, xtc_landscape_bytes, xtc_landscape_sha256, xtc_landscape_page_count)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
                 (
-                    job_id,
+                    resolved_id,
                     title,
                     int(time.time()),
                     source,
@@ -215,7 +232,7 @@ class Database:
                     xtc_landscape_page_count,
                 ),
             )
-        return job_id
+            return resolved_id, cur.rowcount == 1
 
     def get_job(self, job_id: str) -> Optional[sqlite3.Row]:
         return self.query_one("SELECT *, rowid AS ipp_job_id FROM jobs WHERE job_id = ?", (job_id,))
@@ -314,6 +331,39 @@ class Database:
                    WHERE approval_id=?""",
                 (int(time.time()), detail, cups_job_id, error, approval_id),
             )
+
+    def claim_job_for_finalization(self, job_id: str, approval_id: str) -> bool:
+        """Atomically claims job_id's finalized outcome for approval_id —
+        the fix for a real gap record_approval_if_new alone doesn't cover:
+        it only dedupes *retries of the same approval_id*, not two
+        *different* devices independently approving the same job (each
+        gets its own fresh approval_id, so record_approval_if_new treats
+        both as genuinely new). See printer_forward._finish() for the
+        policy on which approvals this is even consulted for (action ==
+        "print" from a device, not the admin console, and not
+        keep/delete, which have no irreversible side effect to protect).
+
+        This is its own transaction() call, not inlined into the approval
+        row's own INSERT OR IGNORE — safe because Database.transaction()
+        serializes every writer through self._write_lock for its whole
+        duration, so no other transaction (including another call to this
+        method) can interleave between them; the atomic UPDATE below is
+        what actually closes the TOCTOU gap a naive "check then apply"
+        would have, since the side effect itself (submit_to_cups) can't
+        run inside a DB transaction.
+
+        The `OR finalizing_approval_id = ?` clause is what makes a *retry
+        of the same* approval_id still succeed (crash-replay case, see
+        replay_unapplied_approvals) while a genuinely different
+        approval_id for the same job correctly fails the claim. Returns
+        True if this approval_id now owns (or already owned) the job."""
+        with self.transaction() as conn:
+            cur = conn.execute(
+                """UPDATE jobs SET finalizing_approval_id = ?
+                   WHERE job_id = ? AND (finalizing_approval_id IS NULL OR finalizing_approval_id = ?)""",
+                (approval_id, job_id, approval_id),
+            )
+            return cur.rowcount == 1
 
     def list_unapplied_approvals(self) -> list[sqlite3.Row]:
         """Approvals that were recorded but never got their side effect

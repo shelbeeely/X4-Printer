@@ -7,6 +7,7 @@
 #include <WiFiClientSecure.h>
 #include <mbedtls/sha256.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -67,6 +68,25 @@ bool configureClientForEndpoint(WiFiClientSecure& client, Endpoint endpoint) {
 }
 
 String buildAuthHeader(const char* token) { return String("Bearer ") + token; }
+
+// Percent-encodes a query-string value (RFC 3986 unreserved set passed
+// through unescaped) — no URL-encoding helper existed anywhere in this
+// firmware before uploadOriginal() needed one for its `?title=` param.
+String urlEncode(const char* s) {
+  static const char* hex = "0123456789ABCDEF";
+  String out;
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s); *p != '\0'; p++) {
+    unsigned char c = *p;
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      out += static_cast<char>(c);
+    } else {
+      out += '%';
+      out += hex[(c >> 4) & 0xF];
+      out += hex[c & 0xF];
+    }
+  }
+  return out;
+}
 
 void sha256HexOf(const uint8_t digest[32], char out[65]) {
   static const char* hexDigits = "0123456789abcdef";
@@ -336,6 +356,38 @@ bool SyncClient::ackJob(const char* jobId, const char* sha256Hex, const char* la
   return code == 200;
 }
 
+bool SyncClient::uploadOriginal(const char* jobId, const char* path, const char* mime, const char* title,
+                                 uint32_t bytes) {
+  if (!piConfigured()) return false;
+
+  FsFile file = SdMan.open(path, O_RDONLY);
+  if (!file) return false;
+
+  WiFiClientSecure client;
+  if (!configureClientForEndpoint(client, Endpoint::Pi)) {
+    file.close();
+    return false;
+  }
+
+  HTTPClient http;
+  http.setConnectTimeout(kHttpTimeoutMs);
+  http.setTimeout(kHttpTimeoutMs);
+
+  String url = String(cfg_.piBaseUrl) + "/devices/" + cfg_.deviceId + "/jobs/" + jobId + "?title=" + urlEncode(title);
+  if (!http.begin(client, url)) {
+    file.close();
+    return false;
+  }
+  http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
+  http.addHeader("X-Device-Id", cfg_.deviceId);
+  http.addHeader("Content-Type", mime);
+
+  int code = http.sendRequest("POST", &file, bytes);
+  file.close();
+  http.end();
+  return code == 200 || code == 201;
+}
+
 ApprovalSubmitResult SyncClient::submitApproval(const store::ApprovalEntry& entry, Endpoint endpoint) {
   ApprovalSubmitResult result;
   bool useRelay = (endpoint == Endpoint::Relay);
@@ -390,6 +442,13 @@ ApprovalSubmitResult SyncClient::submitApproval(const store::ApprovalEntry& entr
     } else if (std::strcmp(status, "already_applied") == 0) {
       result.applied = true;
       result.alreadyApplied = true;
+    } else if (std::strcmp(status, "superseded") == 0) {
+      // A different device's approval already won this job's print outcome
+      // (docs/protocol.md §1.4, printer_forward.claim_job_for_finalization
+      // on the Pi side) -- this job's fate is settled, just not by this
+      // approval, so the outbox should stop retrying it exactly like a
+      // normal "applied" result.
+      result.applied = true;
     }
   }
   http.end();

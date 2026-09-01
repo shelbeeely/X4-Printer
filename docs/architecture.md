@@ -152,6 +152,17 @@ recording it as applied happen in one SQLite transaction.** Concretely,
 2. `INSERT OR IGNORE INTO approvals (...)` — if a row already existed
    (duplicate), read it back, `COMMIT`, and return its stored result without
    touching CUPS.
+2a. For a device-originated `action=print` (not the admin console, not
+   `keep`/`delete`): atomically claim the job's print outcome
+   (`db.claim_job_for_finalization`, its own serialized transaction — see
+   that method's docstring for why a separate transaction is still
+   race-free here). Claim fails (a *different* approval_id already won —
+   two devices raced) → record `applied=1, detail="superseded"` and stop,
+   without touching CUPS. This is the fix for a gap `approval_id`-only
+   dedup above doesn't cover: two DIFFERENT devices independently
+   approving the same still-undecided job each get their own genuinely-new
+   `approval_id`, so step 2 alone can't catch it. See "Direct upload"
+   above and `docs/protocol.md` §1.4's `superseded` status.
 3. Otherwise perform the side effect (`lp -d <queue> <original_path>` for
    `print`, or a status update for `keep`/`delete`).
 4. `UPDATE approvals SET applied=1, detail=..., cups_job_id=... WHERE approval_id=...`
@@ -163,7 +174,18 @@ print could theoretically occur (the `lp` invocation both submitted the job
 retry after restart resubmits). This is bounded and documented as the one
 place true exactly-once cannot be guaranteed without a two-phase commit with
 CUPS itself (which does not support that) — everywhere else, retries,
-relay-vs-direct double delivery, and device reboots are fully idempotent.
+relay-vs-direct double delivery, device reboots, and racing devices are
+fully idempotent.
+
+**Known v1 limitation, stated explicitly rather than silently accepted:**
+step 2a's claim is permanent once won by a device, so a single
+physical/web-UI device that legitimately wants to print the *same* job a
+second time (not a race — a deliberate reprint from that one device) is
+also superseded. Reprinting is still possible via the admin console
+(`received_via="admin"` is exempt from the claim entirely — an
+authenticated human action through a separate, trusted channel, not the
+unattended device race this exists for). Acceptable for a
+personal/small-household scale project; see `docs/security.md`.
 
 ## Deep sleep / wake sequence (firmware)
 
@@ -295,6 +317,70 @@ easy reach, or (hotspot mode) away from any known network entirely.
   periodic status poll counts as activity, an idle one doesn't, and
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
+
+### Direct upload
+
+The Web UI's "Upload" button (`ui/pages/joblist.html`) lets a phone create
+a real print job straight on the X4 — reachable in both Web UI modes
+(hotspot and station), and working with **no Pi reachable at all** at the
+moment of upload, which every other job-creation path in this project
+requires. Images only (JPEG/PNG) for v1, not PDFs. Three steps, in order:
+
+1. **Phone → X4, client-side encode.** The browser reads the picked image,
+   letterbox-resizes it onto an 800×480 canvas (contain, aspect-preserved,
+   centered, white background — matching `xtc_writer.prepare_page_image`'s
+   own algorithm exactly so a locally-encoded page looks the same as a
+   Pi-converted one), extracts grayscale pixels, and hands them to
+   `tools/xtc-wasm/xtc_encoder.cpp` (compiled to WASM, embedded the same
+   way the existing decoder is — see "On-device Web UI" above) — a third
+   independent implementation of the XTC write side, checked against the
+   same `xtc/XtcFormat.h` constants the Pi's `xtc_writer.py` and this
+   firmware's own reader already agree on. The result POSTs to
+   `WebUiServer`'s `/api/upload/xtc`, which streams it to SD and creates a
+   normal `JobEntry` (`store::JobIndex`) — readable/approvable immediately,
+   exactly like a Pi-synced job.
+2. **Phone → X4, second request.** The *original* image bytes (needed
+   later for real print-quality CUPS output — the XTC file is a lossy
+   1bpp e-paper rendering, not print stock) POST to `/api/upload/original`,
+   which streams them to a second SD file and sets the `JobEntry`'s
+   `originalPending = true`. A failure here degrades gracefully: the job
+   still exists and is readable/keepable from step 1, it just can never
+   become a real print until the user retries the whole upload (no
+   partial-upload recovery in v1).
+3. **X4 → Pi, on the next real sync.** `SyncManager::uploadPendingOriginals()`
+   (called from `runFullSync()` **before** `drainApprovalOutbox()` — this
+   ordering is the whole trick, see below) hands any `originalPending`
+   job's original bytes to `POST /devices/{device_id}/jobs/{job_id}`
+   (`docs/protocol.md` §1.7) under the **X4's own job_id** — the Pi's
+   `convert.ingest_document()` runs the exact same conversion pipeline an
+   IPP-submitted job gets, and the row lands under the id the device
+   already has a Print/Keep/Delete approval queued against in its local
+   `ApprovalOutbox`. Once uploaded successfully, the X4 clears
+   `originalPending` and deletes the local original file — the Pi is now
+   the durable owner of it, same as every other job's original.
+
+The design's key property: after step 3 succeeds, **no new code runs the
+actual print** — the job now exists in the Pi's `jobs` table under the id
+the device already queued an approval against, so the *existing*
+`drainApprovalOutbox()` → `POST /approvals` → `apply_approval()` →
+`submit_to_cups()` path just works, unchanged. The only upload-specific
+sync logic is "upload the original first, and never sync an approval for
+a job whose original hasn't landed on the Pi yet" — one guard line in
+`drainApprovalOutbox()` that skips any outbox entry whose job is still
+`originalPending`. This also means a locally-created job can never be
+prematurely forwarded through the relay while away from home: the upload
+step only ever runs against a directly-reachable Pi (`net::Endpoint::Pi`),
+matching the existing "relay never sees document bytes" invariant — if
+only the relay is reachable, both the upload and the guarded approval
+simply wait for a real Pi connection.
+
+**Multiple X4s.** No direct X4-to-X4 link exists (no ESP-NOW, no ad-hoc
+Wi-Fi peering) — each device only ever learns about another device's
+locally-created job on its own next real Pi sync, not instantly from the
+peer. What *is* handled: two devices independently deciding to Print the
+*same* job before either has synced. See "Idempotent approval application"
+above and `docs/protocol.md` §1.4's `superseded` status for how the Pi
+guarantees that never becomes two physical prints.
 
 ### On-device Web UI full-document preview
 

@@ -31,9 +31,8 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from .config import Config
-from .convert import ConversionError, RenderMode, SUPPORTED_MIME_TYPES, convert_document_to_xtc, render_thumbnail_jpeg
+from .convert import ConversionError, SUPPORTED_MIME_TYPES, ingest_document
 from .db import Database
-from .util import sha256_file
 
 logger = logging.getLogger("focusink.ipp")
 
@@ -366,101 +365,25 @@ class IppRequestHandler(BaseHTTPRequestHandler):
         return "application/octet-stream"
 
     def _ingest_document(self, meta: dict, document: bytes) -> Optional[str]:
-        """Converts + persists a submitted document. Returns the new job_id,
-        or None if the document was empty/unsupported (job rejected)."""
+        """Converts + persists a submitted document via convert.ingest_document
+        (source="ipp", no caller-supplied job_id — this path always mints a
+        fresh one). Returns the new job_id, or None if the document was
+        empty/unsupported/failed to convert (job rejected)."""
         if not document:
             logger.warning("received empty document body, rejecting job")
             return None
 
         mime = self._resolve_mime(meta, document)
-        if mime not in SUPPORTED_MIME_TYPES:
-            logger.warning("unsupported document-format %r, rejecting job", mime)
-            return None
-
         title = meta.get("document-name") or meta.get("job-name") or "Untitled document"
 
-        # Populated by on_first_page below, from the exact already-rendered
-        # first page — no second PDF render. A thumbnail-generation failure
-        # must never block job ingestion (the XTC conversion that actually
-        # matters already succeeded by the time this could fail), so
-        # failures here are logged and simply leave the holder empty rather
-        # than propagating.
-        thumbnail_bytes_holder: list[bytes] = []
-
-        def _try_render_thumbnail(img):
-            try:
-                thumbnail_bytes_holder.append(render_thumbnail_jpeg(img))
-            except Exception as exc:  # noqa: BLE001 - must never block job ingestion
-                logger.warning("thumbnail generation failed for job %r: %s", title, exc)
-
         try:
-            xtc_bytes, page_count = convert_document_to_xtc(
-                document,
-                mime,
-                title=title,
-                target_width=self.config.panel_width,
-                target_height=self.config.panel_height,
-                dpi=self.config.render_dpi,
-                on_first_page=_try_render_thumbnail,
+            job_id, _is_new = ingest_document(
+                self.config, self.db, document_bytes=document, mime=mime, title=title, source="ipp"
             )
         except ConversionError as exc:
             logger.error("conversion failed for job %r: %s", title, exc)
             return None
-
-        # Landscape-strip rendering is best-effort: it can fail on page
-        # shapes that would need too many strips (see xtc_writer's
-        # max_strips guard) even when the normal rendering above already
-        # succeeded. A failure here must never block ingestion -- the job
-        # just ships without a landscape variant, same "empty means not
-        # available" contract as thumbnail_bytes_holder above.
-        landscape_xtc_bytes: Optional[bytes] = None
-        landscape_page_count = 0
-        try:
-            landscape_xtc_bytes, landscape_page_count = convert_document_to_xtc(
-                document,
-                mime,
-                title=title,
-                target_width=self.config.panel_width,
-                target_height=self.config.panel_height,
-                dpi=self.config.render_dpi,
-                mode=RenderMode.LANDSCAPE_STRIPS,
-            )
-        except ConversionError as exc:
-            logger.warning("landscape-strip conversion skipped for job %r: %s", title, exc)
-
-        job_id = uuid.uuid4().hex
-        ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}.get(mime, "bin")
-        original_path = self.config.originals_dir / f"{job_id}.{ext}"
-        original_path.write_bytes(document)
-        xtc_path = self.config.xtc_dir / f"{job_id}.xtc"
-        xtc_path.write_bytes(xtc_bytes)
-
-        landscape_xtc_path = self.config.xtc_dir / f"{job_id}_landscape.xtc"
-        if landscape_xtc_bytes is not None:
-            landscape_xtc_path.write_bytes(landscape_xtc_bytes)
-
-        thumbnail_path = self.config.thumbnails_dir / f"{job_id}.jpg"
-        if thumbnail_bytes_holder:
-            thumbnail_path.write_bytes(thumbnail_bytes_holder[0])
-
-        stored_id = self.db.insert_job(
-            title=title,
-            source="ipp",
-            original_path=str(original_path),
-            original_mime=mime,
-            original_bytes=len(document),
-            xtc_path=str(xtc_path),
-            xtc_bytes=len(xtc_bytes),
-            xtc_sha256=sha256_file(xtc_path),
-            page_count=page_count,
-            thumbnail_path=str(thumbnail_path) if thumbnail_bytes_holder else "",
-            xtc_landscape_path=str(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
-            xtc_landscape_bytes=len(landscape_xtc_bytes) if landscape_xtc_bytes is not None else 0,
-            xtc_landscape_sha256=sha256_file(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
-            xtc_landscape_page_count=landscape_page_count,
-        )
-        logger.info("ingested job %s %r (%d pages, %d bytes original)", stored_id, title, page_count, len(document))
-        return stored_id
+        return job_id
 
     def _handle_print_job(self, request_id: int, meta: dict, document: bytes) -> bytes:
         job_id = self._ingest_document(meta, document)

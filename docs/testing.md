@@ -202,7 +202,7 @@ still round-trip correctly regardless of the simulated MAC.
 3. **Expect to debug it.** The most likely first failure, in order:
    - **`diagram.json`'s pin names.** SD wiring (SCLK=GPIO8, MOSI=GPIO10,
      MISO=GPIO7, CS=GPIO12 — the X4's real, shared-with-display SPI
-     pins, see `BoardConfig.h`'s `@@KEEP_FOCUSINK_X4@@` profile) is written from
+     pins, see `BoardConfig.h`'s `XTEINK_X4` profile) is written from
      reading `BoardConfig.h`, not from ever loading this diagram in
      Wokwi's editor. Open `firmware/test/wokwi_sync/diagram.json` in
      Wokwi's web IDE if the simulator itself fails to start — its editor

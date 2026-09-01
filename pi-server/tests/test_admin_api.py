@@ -37,7 +37,7 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False,
         xtc_landscape_path = str(landscape_path)
         xtc_landscape_bytes = landscape_path.stat().st_size
         xtc_landscape_sha256 = sha256_file(landscape_path)
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original_path),
@@ -53,6 +53,7 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False,
         xtc_landscape_sha256=xtc_landscape_sha256,
         xtc_landscape_page_count=2 if with_landscape else 0,
     )
+    return job_id
 
 
 @pytest.fixture

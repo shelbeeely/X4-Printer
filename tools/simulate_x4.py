@@ -20,6 +20,7 @@ import ssl
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
@@ -74,6 +75,16 @@ class X4Client:
             req.add_header(k, v)
         return urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context())
 
+    def _raw_request(self, method: str, url: str, data: bytes, content_type: str):
+        """Like _request, but for a raw (non-JSON) body — used by
+        upload_original() (docs/protocol.md §1.7), which posts the actual
+        image bytes, not a JSON envelope."""
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {self.device_token}")
+        req.add_header("X-Device-Id", self.device_id)
+        req.add_header("Content-Type", content_type)
+        return urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context())
+
     @classmethod
     def from_pairing_file(cls, path: Path, ca_cert: Optional[Path] = None, verify: bool = True) -> "X4Client":
         pairing = json.loads(Path(path).read_text())
@@ -122,6 +133,18 @@ class X4Client:
             "created_at": int(time.time()),
         }
         with self._request("POST", f"{self.base_url}/approvals", body=body) as resp:
+            return json.loads(resp.read())
+
+    def upload_original(self, job_id: str, data: bytes, mime: str, title: str) -> dict:
+        """docs/protocol.md §1.7: the direct-upload endpoint behind the
+        on-device web UI's "Upload" button
+        (SyncManager::uploadPendingOriginals() on real firmware) — hands
+        the Pi a locally-created job's original image bytes under this
+        client's own job_id, so it lands in the same row an already-queued
+        Print/Keep/Delete approval expects."""
+        title_qs = urllib.parse.urlencode({"title": title})
+        url = f"{self.base_url}/devices/{self.device_id}/jobs/{job_id}?{title_qs}"
+        with self._raw_request("POST", url, data, mime) as resp:
             return json.loads(resp.read())
 
     def sync_pending_jobs(self, download_dir: Optional[Path] = None) -> list[DownloadedJob]:
@@ -179,6 +202,13 @@ def _cmd_approve(client: X4Client, args: argparse.Namespace) -> None:
     print(client.submit_approval(args.job_id, args.action))
 
 
+def _cmd_upload(client: X4Client, args: argparse.Namespace) -> None:
+    job_id = args.job_id or uuid.uuid4().hex
+    data = Path(args.file).read_bytes()
+    result = client.upload_original(job_id, data, args.mime, args.title)
+    print(result)
+
+
 def _cmd_sync(client: X4Client, args: argparse.Namespace) -> None:
     jobs = client.sync_pending_jobs(download_dir=Path(args.download_dir) if args.download_dir else None)
     for job in jobs:
@@ -206,6 +236,11 @@ def main() -> int:
     p_approve.add_argument("action", choices=["print", "keep", "delete"])
     p_sync = sub.add_parser("sync")
     p_sync.add_argument("--download-dir", type=Path)
+    p_upload = sub.add_parser("upload", help="docs/protocol.md §1.7 direct-upload endpoint")
+    p_upload.add_argument("file", type=Path, help="image file to upload (JPEG or PNG)")
+    p_upload.add_argument("--job-id", help="defaults to a fresh uuid4 hex, like a real device would generate")
+    p_upload.add_argument("--mime", default="image/jpeg", choices=["image/jpeg", "image/png"])
+    p_upload.add_argument("--title", default="Untitled")
 
     args = parser.parse_args()
 
@@ -227,6 +262,7 @@ def main() -> int:
         "download": _cmd_download,
         "approve": _cmd_approve,
         "sync": _cmd_sync,
+        "upload": _cmd_upload,
     }[args.command](client, args)
     return 0
 

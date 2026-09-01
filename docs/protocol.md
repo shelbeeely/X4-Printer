@@ -129,10 +129,28 @@ Response:
 {"approval_id": "8c1e...f0", "status": "applied", "detail": "printed", "cups_job_id": 42}
 ```
 
-`status` is `applied` (first time processed) or `already_applied` (dedup hit
-— body still describes the original outcome). For `action=print`, `detail`
-is one of `printed`, `print_failed` (with `error` populated); for `keep` /
-`delete` it is `kept` / `archived`.
+`status` is `applied` (first time processed), `already_applied` (dedup hit
+— body still describes the original outcome), or `superseded` (see below).
+For `action=print`, `detail` is one of `printed`, `print_failed` (with
+`error` populated); for `keep` / `delete` it is `kept` / `archived`.
+
+`superseded` covers a gap `approval_id`-based dedup alone doesn't:
+`record_approval_if_new` only catches *retries of the same approval_id*
+(the case above), not two *different* devices independently submitting
+their own approval for the same `job_id` — e.g. two paired X4s that both
+downloaded the same job before either had synced, and both tapped Print.
+Each generates its own genuinely-new `approval_id`, so the Pi additionally
+claims each still-undecided job's print outcome for whichever device-
+originated `action=print` approval reaches it first
+(`printer_forward.claim_job_for_finalization`); a second, different
+`approval_id` for the same job gets `status=superseded` (`detail`
+`superseded`, `error` naming the winning `approval_id`) instead of a
+second `lp` invocation. Scoped to `action=print` from a device only —
+`keep`/`delete` have no irreversible side effect to protect, and the
+admin console's own reprint/re-decide actions (`received_via=admin`) are
+never superseded. A device receiving `superseded` should treat it exactly
+like `applied` for outbox purposes: this job's fate is settled, just not
+by this approval — see §3.
 
 ### 1.5 `GET /devices/{device_id}/status`
 
@@ -183,6 +201,40 @@ Both lists are capped by firmware's fixed-capacity arrays
 console's add endpoints reject a request that would exceed either cap
 (`admin_api.py`'s `MAX_CALENDAR_FEEDS`/`MAX_WIFI_NETWORKS`) rather than
 letting the device silently truncate the list on sync.
+
+### 1.7 `POST /devices/{device_id}/jobs/{job_id}?title=<title>`
+
+The direct-upload endpoint behind the on-device web UI's "Upload" button
+(`ui/WebUiServer.cpp`, `ui/pages/joblist.html`) — lets a phone create a
+real print job straight on the X4, with no Pi involved at the moment of
+upload, and later hand it off for real printing once the Pi is reachable.
+See `docs/architecture.md`'s direct-upload section for the full flow; this
+endpoint is step 3 of it.
+
+Request body is the raw image bytes (not JSON) — `Content-Type` is
+`image/jpeg` or `image/png` (any other value is rejected; this endpoint
+intentionally accepts a narrower set than the IPP path's
+`SUPPORTED_MIME_TYPES`, since the on-device WASM converter that feeds it
+only ever produces/forwards these two). `job_id` in the path is generated
+**on the device**, the same idempotency-key philosophy `approval_id`
+already uses (§1.4): it's the id the device already created a
+`JobEntry`/queued a Print approval against locally, so the row this
+creates lines up with what the device's `ApprovalOutbox` expects to sync
+next.
+
+Response:
+
+```json
+{"job_id": "3f9a...e21", "status": "created"}
+```
+
+`status` is `created` (first time this `job_id` was seen) or
+`already_exists` (retried after a dropped connection — a cheap no-op, not
+a duplicate row or a repeated conversion pass; see
+`convert.ingest_document`). Once this returns successfully, the job
+behaves exactly like an IPP-submitted one for every purpose downstream
+(listed to devices, downloadable, printable) — its only difference is
+`jobs.source = "x4_upload"` instead of `"ipp"`.
 
 ## 2. Relay Protocol (X4 <-> Relay <-> Pi, over the internet)
 
@@ -242,9 +294,11 @@ and previews on the LAN only.
 | Layer | Key | Effect of a duplicate |
 |---|---|---|
 | Pi `approvals` table | `approval_id` (UNIQUE) | Returns the stored result; never re-submits to CUPS |
+| Pi `jobs.finalizing_approval_id` (§1.4) | First device-originated `action=print` approval_id to claim a given `job_id` | A *different* approval_id for the same job (two devices racing) gets `status=superseded` instead of a second CUPS submission — closes the gap approval_id-only dedup above doesn't cover |
 | CUPS submission | `approvals.cups_job_id` set only on first success | A crash between "insert approval row" and "submit to CUPS" is safe: on restart the Pi finds rows with `applied=0` and (re)submits exactly once, because the submission itself happens inside the same transaction boundary as marking `applied=1` |
 | Relay `approvals` table | `approval_id` (UNIQUE) | Duplicate POST from a flaky retry just returns `queued` again, no duplicate delivery to the Pi |
 | Device outbox | `approval_id` generated once, stored durably before any network attempt | Reboots/power loss mid-sync never lose or duplicate an approval — the outbox entry is retried until acked, using the same id |
+| Pi `jobs` table (§1.7) | `job_id` (PRIMARY KEY), caller-supplied by the direct-upload endpoint | A retried upload (dropped connection after the Pi already ingested it) is a no-op (`status=already_exists`), not a duplicate row or conversion pass |
 
 ## 4. XTC/XTG file format
 

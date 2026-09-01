@@ -10,6 +10,7 @@ from focusink_server.config import Config
 from focusink_server.db import Database
 from focusink_server.sync_api import SyncApiServer
 from focusink_server.util import hash_token
+from tests.conftest import make_test_png
 
 
 DEVICE_ID = "dev-test1"
@@ -23,7 +24,7 @@ def _insert_job(db: Database, config: Config, title="Doc") -> str:
 
     original_path = config.originals_dir / "job1.pdf"
     original_path.write_bytes(b"%PDF-fake-bytes")
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original_path),
@@ -34,6 +35,7 @@ def _insert_job(db: Database, config: Config, title="Doc") -> str:
         xtc_sha256=sha256_file(xtc_path),
         page_count=1,
     )
+    return job_id
 
 
 @pytest.fixture
@@ -66,6 +68,16 @@ def _post(url, body, token=DEVICE_TOKEN, device=DEVICE_ID):
         data=data,
         method="POST",
         headers={"Authorization": f"Bearer {token}", "X-Device-Id": device, "Content-Type": "application/json"},
+    )
+    return urllib.request.urlopen(req, timeout=5)
+
+
+def _post_raw(url, data: bytes, content_type: str, token=DEVICE_TOKEN, device=DEVICE_ID):
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}", "X-Device-Id": device, "Content-Type": content_type},
     )
     return urllib.request.urlopen(req, timeout=5)
 
@@ -177,6 +189,64 @@ def test_approval_print_is_idempotent_over_http(running_sync_api, fake_lp_binary
 
     call_log = fake_lp_binary.log_path.read_text().strip().splitlines()
     assert len(call_log) == 1
+
+
+# -- POST /devices/{id}/jobs/{job_id}: X4 direct-upload endpoint (docs/protocol.md §1.7) --
+
+UPLOAD_JOB_ID = "x4jobfeedfacefeedfacefeedfacefee"
+
+
+def test_upload_original_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    png = make_test_png()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=Photo", png, "image/png", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_upload_original_rejects_device_id_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    png = make_test_png()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/dev-other/jobs/{UPLOAD_JOB_ID}?title=Photo", png, "image/png")
+    assert exc.value.code == 403
+
+
+def test_upload_original_rejects_unsupported_mime(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=Doc", b"%PDF-fake", "application/pdf")
+    assert exc.value.code == 400
+
+
+def test_upload_original_creates_job_under_device_supplied_id(running_sync_api):
+    base, db, _config = running_sync_api
+    png = make_test_png()
+    resp = json.loads(
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=My+Photo", png, "image/png").read()
+    )
+    assert resp["job_id"] == UPLOAD_JOB_ID
+    assert resp["status"] == "created"
+
+    row = db.get_job(UPLOAD_JOB_ID)
+    assert row is not None
+    assert row["title"] == "My Photo"
+    assert row["source"] == "x4_upload"
+    assert row["status"] == "pending"
+
+
+def test_upload_original_retry_with_same_job_id_is_a_no_op(running_sync_api):
+    base, db, _config = running_sync_api
+    png = make_test_png()
+    url = f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=My+Photo"
+
+    resp1 = json.loads(_post_raw(url, png, "image/png").read())
+    resp2 = json.loads(_post_raw(url, png, "image/png").read())
+
+    assert resp1["status"] == "created"
+    assert resp2["status"] == "already_exists"
+    assert resp1["job_id"] == resp2["job_id"] == UPLOAD_JOB_ID
+    assert len(db.list_all_jobs()) == 1
 
 
 def test_approval_device_mismatch_rejected(running_sync_api):

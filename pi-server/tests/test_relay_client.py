@@ -23,7 +23,7 @@ DEVICE_ID = "dev-1"
 def _insert_job(db: Database, config: Config, title="Doc") -> str:
     original = config.originals_dir / "orig.pdf"
     original.write_bytes(b"%PDF-fake")
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original),
@@ -34,6 +34,7 @@ def _insert_job(db: Database, config: Config, title="Doc") -> str:
         xtc_sha256="deadbeef",
         page_count=1,
     )
+    return job_id
 
 
 class _FakeRelayHandler(BaseHTTPRequestHandler):

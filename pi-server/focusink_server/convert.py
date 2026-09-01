@@ -17,13 +17,19 @@ from __future__ import annotations
 
 import io
 import logging
+import uuid
 from enum import Enum
-from typing import Callable, Iterator, Optional
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 import fitz  # PyMuPDF
 from PIL import Image
 
+from .util import sha256_file
 from .xtc_writer import ConversionError, XtcMetadata, encode_xtc, prepare_landscape_strip_images, prepare_page_image
+
+if TYPE_CHECKING:
+    from .config import Config
+    from .db import Database
 
 logger = logging.getLogger("focusink.convert")
 
@@ -152,3 +158,115 @@ def convert_document_to_xtc(
 
     xtc_bytes = encode_xtc(prepared_pages, XtcMetadata(title=title, author=author))
     return xtc_bytes, page_count
+
+
+def ingest_document(
+    config: "Config",
+    db: "Database",
+    *,
+    document_bytes: bytes,
+    mime: str,
+    title: str,
+    source: str,
+    job_id: Optional[str] = None,
+) -> tuple[str, bool]:
+    """Converts + persists a submitted document -- the shared core behind
+    ipp_server.py's IPP ingestion (source="ipp") and sync_api.py's X4
+    direct-upload endpoint (source="x4_upload", docs/protocol.md §1.7).
+    Returns (job_id, is_new). Raises ConversionError if the document is
+    empty, unsupported, or fails to render.
+
+    When `job_id` is given (the X4 direct-upload path, where the id is
+    generated on-device so it lines up with a Print/Keep/Delete approval
+    the device may already have queued against it — see
+    docs/architecture.md's direct-upload section) and a row with that id
+    already exists, this is a no-op that returns the existing id with
+    is_new=False: a retried upload after a dropped connection becomes
+    cheap rather than repeating the conversion pass and duplicating files
+    on disk. This guards against a duplicate *row*/duplicate conversion
+    work on retry only -- it does not by itself guard against a duplicate
+    *print*, which is a separate risk from two different devices'
+    independent approvals for the same job; see printer_forward.py's
+    claim_job_for_finalization for that."""
+    if not document_bytes:
+        raise ConversionError("empty document body")
+    if mime not in SUPPORTED_MIME_TYPES:
+        raise ConversionError(f"unsupported document type {mime!r}")
+
+    if job_id is not None and db.get_job(job_id) is not None:
+        return job_id, False
+
+    thumbnail_bytes_holder: list[bytes] = []
+
+    def _try_render_thumbnail(img):
+        try:
+            thumbnail_bytes_holder.append(render_thumbnail_jpeg(img))
+        except Exception as exc:  # noqa: BLE001 - must never block job ingestion
+            logger.warning("thumbnail generation failed for job %r: %s", title, exc)
+
+    xtc_bytes, page_count = convert_document_to_xtc(
+        document_bytes,
+        mime,
+        title=title,
+        target_width=config.panel_width,
+        target_height=config.panel_height,
+        dpi=config.render_dpi,
+        on_first_page=_try_render_thumbnail,
+    )
+
+    # Landscape-strip rendering is best-effort -- see the identical comment
+    # this mirrors in the pre-extraction ipp_server.py history: a failure
+    # here must never block ingestion, the job just ships without a
+    # landscape variant.
+    landscape_xtc_bytes: Optional[bytes] = None
+    landscape_page_count = 0
+    try:
+        landscape_xtc_bytes, landscape_page_count = convert_document_to_xtc(
+            document_bytes,
+            mime,
+            title=title,
+            target_width=config.panel_width,
+            target_height=config.panel_height,
+            dpi=config.render_dpi,
+            mode=RenderMode.LANDSCAPE_STRIPS,
+        )
+    except ConversionError as exc:
+        logger.warning("landscape-strip conversion skipped for job %r: %s", title, exc)
+
+    resolved_id = job_id or uuid.uuid4().hex
+    ext = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}.get(mime, "bin")
+    original_path = config.originals_dir / f"{resolved_id}.{ext}"
+    original_path.write_bytes(document_bytes)
+    xtc_path = config.xtc_dir / f"{resolved_id}.xtc"
+    xtc_path.write_bytes(xtc_bytes)
+
+    landscape_xtc_path = config.xtc_dir / f"{resolved_id}_landscape.xtc"
+    if landscape_xtc_bytes is not None:
+        landscape_xtc_path.write_bytes(landscape_xtc_bytes)
+
+    thumbnail_path = config.thumbnails_dir / f"{resolved_id}.jpg"
+    if thumbnail_bytes_holder:
+        thumbnail_path.write_bytes(thumbnail_bytes_holder[0])
+
+    stored_id, is_new = db.insert_job(
+        title=title,
+        source=source,
+        original_path=str(original_path),
+        original_mime=mime,
+        original_bytes=len(document_bytes),
+        xtc_path=str(xtc_path),
+        xtc_bytes=len(xtc_bytes),
+        xtc_sha256=sha256_file(xtc_path),
+        page_count=page_count,
+        thumbnail_path=str(thumbnail_path) if thumbnail_bytes_holder else "",
+        xtc_landscape_path=str(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
+        xtc_landscape_bytes=len(landscape_xtc_bytes) if landscape_xtc_bytes is not None else 0,
+        xtc_landscape_sha256=sha256_file(landscape_xtc_path) if landscape_xtc_bytes is not None else "",
+        xtc_landscape_page_count=landscape_page_count,
+        job_id=job_id,
+    )
+    logger.info(
+        "ingested job %s %r (%d pages, %d bytes original, source=%s, is_new=%s)",
+        stored_id, title, page_count, len(document_bytes), source, is_new,
+    )
+    return stored_id, is_new

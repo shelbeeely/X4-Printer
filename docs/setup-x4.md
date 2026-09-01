@@ -218,6 +218,34 @@ HTTP, and shuts itself off on the same idle timer as everything else).
    "On-device diagnostics panel" for exactly what each field means and why
    some rows can be absent on a given device.
 
+### Uploading a photo/screenshot directly
+
+The **Upload** button (top of the job list, next to the theme toggle) lets
+you create a new print job straight from your phone's camera roll — no Pi
+needed at the moment you do it, and it works in either Web UI mode
+(including Hotspot, with no network beyond the phone). Images only
+(JPEG/PNG) for now, not PDFs. See `docs/architecture.md`'s "Direct upload"
+section for the full design; from the phone it's just:
+
+1. Tap **Upload**, pick a photo or screenshot.
+2. The browser encodes it into a real page entirely on-device (no upload
+   to any server for this step) and it appears in the job list right away,
+   readable/approvable immediately, same as a Pi-synced job.
+3. Tap **Print** on it like any other job. If the Pi isn't reachable right
+   now (Hotspot mode, or you're just not on the home network), this still
+   queues a real print for later: the X4 holds onto the original photo and
+   hands it to the Pi automatically on its next real sync — you don't need
+   to do anything else.
+4. If a job shows **"Printing (offline — will queue when back on
+   Wi-Fi)"**, that's this in-between state — it clears itself once the
+   device gets back on the home network and syncs.
+
+The one thing that doesn't self-recover: if the original photo fails to
+upload right after the page appears (a dropped connection mid-upload),
+the page shows a clear error and the job stays readable/keepable but can
+never become a real print — retry the whole upload from scratch (pick the
+photo again) rather than trying to resume it.
+
 ## 6. Remote approval away from home
 
 Once `docs/relay.md` is set up and `device.json` includes the relay fields

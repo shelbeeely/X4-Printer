@@ -184,3 +184,69 @@ def test_remote_approval_via_relay_reaches_printer_exactly_once(pi_stack, relay_
     assert applied_again == 0
     call_log_after = pi_stack["fake_lp_binary"].log_path.read_text().strip().splitlines()
     assert len(call_log_after) == 1  # still exactly one physical print
+
+
+def _make_png(color: str = "white", size: tuple[int, int] = (400, 300)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", size, color)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_direct_upload_from_x4_to_printed_job(pi_stack):
+    """The "direct upload" flow (docs/architecture.md "Direct upload",
+    docs/protocol.md §1.7): a phone photo becomes a real job entirely
+    on-device with no Pi involved at that moment -- the client-side
+    WASM-encode step (tools/xtc-wasm/xtc_encoder.cpp) and browser UI
+    aren't exercised here, only the sync-side upload this test *can*
+    reach through simulate_x4.py's upload_original(), which mirrors
+    SyncManager::uploadPendingOriginals(). The Pi ingests it under the
+    X4's own job_id, so it lands under the exact id the device already has
+    a Print approval queued against locally (its ApprovalOutbox, also not
+    simulated here) -- proving the *existing* approval-apply path handles
+    an x4_upload-sourced job identically to an IPP-sourced one, with no
+    new print-path code."""
+    client = X4Client(
+        base_url=pi_stack["sync_base_url"],
+        device_id=pi_stack["device_id"],
+        device_token=pi_stack["device_token"],
+    )
+
+    import uuid
+
+    job_id = uuid.uuid4().hex  # the X4 generates this itself, the moment the user picks a photo
+    png_bytes = _make_png()
+
+    assert pi_stack["db"].get_job(job_id) is None  # nothing on the Pi yet -- created purely on-device
+
+    result = client.upload_original(job_id, png_bytes, "image/png", "Whiteboard Photo")
+    assert result["job_id"] == job_id
+    assert result["status"] == "created"
+
+    job_row = pi_stack["db"].get_job(job_id)
+    assert job_row is not None
+    assert job_row["title"] == "Whiteboard Photo"
+    assert job_row["source"] == "x4_upload"
+    assert job_row["status"] == "pending"
+
+    # A retried upload (the same connection-dropped-after-ingestion case
+    # uploadPendingOriginals() would retry on the next wake) is a no-op,
+    # not a duplicate job.
+    retry_result = client.upload_original(job_id, png_bytes, "image/png", "Whiteboard Photo")
+    assert retry_result["status"] == "already_exists"
+    assert len(pi_stack["db"].list_all_jobs()) == 1
+
+    # Once the original has landed, syncing a Print approval for this same
+    # job_id goes through the exact same code path any Pi-originated job's
+    # approval already does -- the key design property of this feature.
+    approval = client.submit_approval(job_id, "print")
+    assert approval["status"] == "applied"
+    assert approval["detail"] == "printed"
+
+    call_log = pi_stack["fake_lp_binary"].log_path.read_text().strip().splitlines()
+    assert len(call_log) == 1
+    assert job_row["original_path"] in call_log[0]

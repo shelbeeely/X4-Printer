@@ -15,7 +15,9 @@
 #include "net/WifiManager.h"
 #include "ui/PagesData.h"
 #include "ui/XtcDecoderWasmData.h"
+#include "ui/XtcEncoderWasmData.h"
 #include "util/Random.h"
+#include "xtc/XtcReader.h"
 
 namespace ui {
 
@@ -29,6 +31,15 @@ namespace {
 // Matches xtc::XtcReader.cpp's own kBulkChunkBytes — bounded RAM regardless
 // of job size, no full-file buffer.
 constexpr size_t kXtcStreamChunkBytes = 2048;
+
+// Generous upper bounds for the two direct-upload routes below, just to
+// stop a buggy/malicious client from filling the SD card — not tuned to
+// any real expected size. A single 800x480 1bpp XTC page tops out well
+// under 64KB; a phone camera photo can legitimately run into the low tens
+// of megabytes, so that cap is far larger (and matches the sync-side cap
+// pi-server's new upload endpoint enforces — see docs/protocol.md §1.7).
+constexpr uint32_t kMaxXtcUploadBytes = 512u * 1024u;
+constexpr uint32_t kMaxOriginalUploadBytes = 20u * 1024u * 1024u;
 
 void randomPin(char* out) {  // out must be 7 bytes
   uint32_t v = esp_random() % 1000000u;
@@ -155,6 +166,28 @@ void WebUiServer::beginCommon() {
       markActivity();
       handleXtcDecoderJs();
     });
+    server_.on("/xtc-encoder.wasm", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcEncoderWasm();
+    });
+    server_.on("/xtc-encoder.js", HTTP_GET, [this]() {
+      markActivity();
+      handleXtcEncoderJs();
+    });
+    server_.on(
+        "/api/upload/xtc", HTTP_POST,
+        [this]() {
+          markActivity();
+          handleUploadXtcComplete();
+        },
+        [this]() { handleUploadXtcData(); });
+    server_.on(
+        "/api/upload/original", HTTP_POST,
+        [this]() {
+          markActivity();
+          handleUploadOriginalComplete();
+        },
+        [this]() { handleUploadOriginalData(); });
     server_.onNotFound([this]() {
       markActivity();
       handleNotFound();
@@ -315,7 +348,7 @@ void WebUiServer::handleApiDiag() {
   doc["sd_total_bytes"] = sdTotal;
   doc["sd_free_bytes"] = sdTotal >= sdUsed ? sdTotal - sdUsed : 0;
 
-  // X4 is an ADC-backed board (BoardConfig::@@KEEP_FOCUSINK_X4@@ has no charge-status
+  // X4 is an ADC-backed board (BoardConfig::XTEINK_X4 has no charge-status
   // pin), so percentage/millivolts are the only fields this hardware can
   // report -- chargingKnown/externalPowerKnown always come back false here,
   // not a bug in this call. Omit rather than send a misleading always-false
@@ -351,6 +384,7 @@ void WebUiServer::handleApiJobsGet() {
     j["xtc_sha256"] = e.xtcSha256;
     j["created_at"] = e.createdAt;
     j["pending_approval"] = outbox_ != nullptr && outbox_->hasPendingForJob(e.jobId);
+    j["original_pending"] = e.originalPending;
   }
 
   String out;
@@ -467,6 +501,265 @@ void WebUiServer::handleXtcDecoderJs() {
     return;
   }
   sendGzip(200, "application/javascript", kXtcDecoderJsGz, kXtcDecoderJsGzLen);
+}
+
+void WebUiServer::handleXtcEncoderWasm() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  sendGzip(200, "application/wasm", kXtcEncoderWasmGz, kXtcEncoderWasmGzLen);
+}
+
+void WebUiServer::handleXtcEncoderJs() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  sendGzip(200, "application/javascript", kXtcEncoderJsGz, kXtcEncoderJsGzLen);
+}
+
+// -- POST /api/upload/xtc: the job-list page's "Upload" button hands us an
+// already-client-side-encoded single-page XTC file (see
+// tools/xtc-wasm/xtc_encoder.cpp), which becomes a normal JobEntry as soon
+// as it's written -- readable/approvable immediately, exactly like a
+// Pi-synced job. Requires a multipart/form-data body with one file field
+// (WebServer's upload-handler mechanism only fires for multipart bodies —
+// see WebServer.h/Parsing.cpp); title comes from a query-string arg since
+// it isn't part of the file's own bytes.
+//
+// The upload-handler callback (this method) runs repeatedly as the
+// request body streams in, well before the completion handler
+// (handleUploadXtcComplete()) — that's why the outcome is staged into
+// member state rather than being decided here.
+void WebUiServer::handleUploadXtcData() {
+  HTTPUpload& upload = server_.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    uploadXtcAuthorized_ = false;
+    uploadXtcTooLarge_ = false;
+    uploadXtcError_ = nullptr;
+    uploadXtcBytes_ = 0;
+
+    if (!requestHasValidSession()) {
+      uploadXtcError_ = "unauthorized";
+      return;
+    }
+    if (jobs_ == nullptr) {
+      uploadXtcError_ = "not_ready";
+      return;
+    }
+    if (jobs_->full()) {
+      uploadXtcError_ = "inbox_full";
+      return;
+    }
+
+    fwrand::randomHex(uploadXtcJobId_, store::kJobIdLen);
+    std::snprintf(uploadXtcPath_, sizeof(uploadXtcPath_), "/inbox/%s.xtc", uploadXtcJobId_);
+    SdMan.ensureDirectoryExists("/inbox");
+    uploadXtcFile_ = SdMan.open(uploadXtcPath_, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!uploadXtcFile_) {
+      uploadXtcError_ = "io_error";
+      return;
+    }
+    uploadXtcAuthorized_ = true;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!uploadXtcAuthorized_ || !uploadXtcFile_) return;
+    if (uploadXtcBytes_ + upload.currentSize > kMaxXtcUploadBytes) {
+      uploadXtcTooLarge_ = true;
+      return;
+    }
+    if (uploadXtcTooLarge_) return;  // already over budget; keep draining the request without writing more
+    uploadXtcFile_.write(upload.buf, upload.currentSize);
+    uploadXtcBytes_ += upload.currentSize;
+    return;
+  }
+
+  // UPLOAD_FILE_END or UPLOAD_FILE_ABORTED
+  if (uploadXtcFile_) uploadXtcFile_.close();
+}
+
+void WebUiServer::handleUploadXtcComplete() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  if (!uploadXtcAuthorized_) {
+    SdMan.remove(uploadXtcPath_);
+    JsonDocument errDoc;
+    errDoc["error"] = uploadXtcError_ != nullptr ? uploadXtcError_ : "upload_failed";
+    String out;
+    serializeJson(errDoc, out);
+    server_.send(uploadXtcError_ != nullptr && std::strcmp(uploadXtcError_, "inbox_full") == 0 ? 409 : 400,
+                 "application/json", out);
+    return;
+  }
+  if (uploadXtcTooLarge_) {
+    SdMan.remove(uploadXtcPath_);
+    server_.send(413, "application/json", "{\"error\":\"too_large\"}");
+    return;
+  }
+  if (uploadXtcBytes_ == 0) {
+    SdMan.remove(uploadXtcPath_);
+    server_.send(400, "application/json", "{\"error\":\"empty_upload\"}");
+    return;
+  }
+
+  // Validate the file we just wrote with the same reader firmware uses to
+  // render pages, rather than trusting the client's claim that this is a
+  // well-formed XTC file -- derives page_count from the file itself.
+  xtc::XtcReader reader;
+  if (!reader.open(uploadXtcPath_) || reader.pageCount() == 0) {
+    reader.close();
+    SdMan.remove(uploadXtcPath_);
+    server_.send(400, "application/json", "{\"error\":\"invalid_xtc\"}");
+    return;
+  }
+  uint16_t pageCount = reader.pageCount();
+  reader.close();
+
+  store::JobEntry entry;
+  std::strncpy(entry.jobId, uploadXtcJobId_, sizeof(entry.jobId) - 1);
+  String title = server_.arg("title");
+  if (title.isEmpty()) title = "Untitled";
+  title.toCharArray(entry.title, sizeof(entry.title));
+  std::strncpy(entry.xtcPath, uploadXtcPath_, sizeof(entry.xtcPath) - 1);
+  entry.xtcBytes = uploadXtcBytes_;
+  entry.pageCount = pageCount;
+  entry.createdAt = static_cast<uint32_t>(std::time(nullptr));
+  entry.status = store::JobStatus::Downloaded;
+
+  if (!jobs_->upsert(entry)) {
+    SdMan.remove(uploadXtcPath_);
+    server_.send(409, "application/json", "{\"error\":\"inbox_full\"}");
+    return;
+  }
+  store::saveJobIndex(*jobs_);
+
+  JsonDocument doc;
+  doc["job_id"] = entry.jobId;
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+// -- POST /api/upload/original: the second step of the same "Upload" flow
+// -- hands us the ORIGINAL (undithered, full color/resolution) image bytes
+// for a job /api/upload/xtc already created, so the Pi can later run them
+// through its normal conversion pipeline for a real print (the XTC file
+// alone is a lossy 1bpp e-paper rendering, not print stock). Marks the job
+// originalPending so SyncManager::uploadPendingOriginals() picks it up on
+// the next real sync -- see docs/architecture.md's direct-upload section.
+void WebUiServer::handleUploadOriginalData() {
+  HTTPUpload& upload = server_.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    uploadOriginalAuthorized_ = false;
+    uploadOriginalTooLarge_ = false;
+    uploadOriginalError_ = nullptr;
+    uploadOriginalBytes_ = 0;
+
+    if (!requestHasValidSession()) {
+      uploadOriginalError_ = "unauthorized";
+      return;
+    }
+    if (jobs_ == nullptr) {
+      uploadOriginalError_ = "not_ready";
+      return;
+    }
+
+    String jobId = server_.arg("job_id");
+    const store::JobEntry* existing = jobs_->find(jobId.c_str());
+    if (existing == nullptr) {
+      uploadOriginalError_ = "unknown_job";
+      return;
+    }
+
+    String mime = server_.arg("mime");
+    const char* ext = nullptr;
+    if (mime == "image/jpeg") {
+      ext = "jpg";
+    } else if (mime == "image/png") {
+      ext = "png";
+    } else {
+      uploadOriginalError_ = "unsupported_mime";
+      return;
+    }
+
+    std::strncpy(uploadOriginalJobId_, jobId.c_str(), sizeof(uploadOriginalJobId_) - 1);
+    mime.toCharArray(uploadOriginalMime_, sizeof(uploadOriginalMime_));
+    std::snprintf(uploadOriginalPath_, sizeof(uploadOriginalPath_), "/inbox/%s_orig.%s", uploadOriginalJobId_, ext);
+    SdMan.ensureDirectoryExists("/inbox");
+    uploadOriginalFile_ = SdMan.open(uploadOriginalPath_, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!uploadOriginalFile_) {
+      uploadOriginalError_ = "io_error";
+      return;
+    }
+    uploadOriginalAuthorized_ = true;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!uploadOriginalAuthorized_ || !uploadOriginalFile_) return;
+    if (uploadOriginalBytes_ + upload.currentSize > kMaxOriginalUploadBytes) {
+      uploadOriginalTooLarge_ = true;
+      return;
+    }
+    if (uploadOriginalTooLarge_) return;
+    uploadOriginalFile_.write(upload.buf, upload.currentSize);
+    uploadOriginalBytes_ += upload.currentSize;
+    return;
+  }
+
+  if (uploadOriginalFile_) uploadOriginalFile_.close();
+}
+
+void WebUiServer::handleUploadOriginalComplete() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+  if (!uploadOriginalAuthorized_) {
+    if (uploadOriginalPath_[0] != '\0') SdMan.remove(uploadOriginalPath_);
+    JsonDocument errDoc;
+    errDoc["error"] = uploadOriginalError_ != nullptr ? uploadOriginalError_ : "upload_failed";
+    String out;
+    serializeJson(errDoc, out);
+    int code = 400;
+    if (uploadOriginalError_ != nullptr && std::strcmp(uploadOriginalError_, "unknown_job") == 0) code = 404;
+    server_.send(code, "application/json", out);
+    return;
+  }
+  if (uploadOriginalTooLarge_) {
+    SdMan.remove(uploadOriginalPath_);
+    server_.send(413, "application/json", "{\"error\":\"too_large\"}");
+    return;
+  }
+  if (uploadOriginalBytes_ == 0) {
+    SdMan.remove(uploadOriginalPath_);
+    server_.send(400, "application/json", "{\"error\":\"empty_upload\"}");
+    return;
+  }
+
+  store::JobEntry* entry = jobs_->find(uploadOriginalJobId_);
+  if (entry == nullptr) {
+    // The job was deleted while this upload was in flight -- the original
+    // has nowhere to attach to any more.
+    SdMan.remove(uploadOriginalPath_);
+    server_.send(404, "application/json", "{\"error\":\"unknown_job\"}");
+    return;
+  }
+
+  entry->originalPending = true;
+  std::strncpy(entry->originalPath, uploadOriginalPath_, sizeof(entry->originalPath) - 1);
+  std::strncpy(entry->originalMime, uploadOriginalMime_, sizeof(entry->originalMime) - 1);
+  entry->originalBytes = uploadOriginalBytes_;
+  store::saveJobIndex(*jobs_);
+
+  server_.send(200, "application/json", "{\"status\":\"ok\"}");
 }
 
 void WebUiServer::sendGzip(int code, const char* contentType, const unsigned char* data, size_t len) {

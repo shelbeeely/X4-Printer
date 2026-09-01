@@ -1,6 +1,7 @@
 #include "sync/SyncManager.h"
 
 #include <Arduino.h>
+#include <SDCardManager.h>
 
 #include <cstring>
 #include <ctime>
@@ -49,6 +50,7 @@ SyncSummary SyncManager::runFullSync() {
   net::SyncClient client(cfg_);
 
   downloadPendingJobs(client, summary);
+  uploadPendingOriginals(client, summary);
   drainApprovalOutbox(client, summary);
 
   // docs/architecture.md step 7: one bounded extra pass if this wake
@@ -152,6 +154,52 @@ void SyncManager::downloadPendingJobs(net::SyncClient& client, SyncSummary& summ
   (void)anyChange;
 }
 
+void SyncManager::uploadPendingOriginals(net::SyncClient& client, SyncSummary& summary) {
+  // Direct reachability required, checked here rather than reused from
+  // drainApprovalOutbox()'s own check below: this step now runs earlier
+  // (ordering is what makes the "no new print-path code" design work —
+  // see docs/architecture.md's direct-upload section), and it must never
+  // run over the relay (the relay never sees document bytes).
+  if (!client.statusCheck(net::Endpoint::Pi)) return;
+
+  bool changed = false;
+  for (size_t i = 0; i < jobs_.count(); i++) {
+    const store::JobEntry& snapshot = jobs_.at(i);
+    if (!snapshot.originalPending) continue;
+
+    char jobId[store::kJobIdLen + 1];
+    std::strncpy(jobId, snapshot.jobId, sizeof(jobId) - 1);
+    jobId[sizeof(jobId) - 1] = '\0';
+    char path[store::kPathLen + 1];
+    std::strncpy(path, snapshot.originalPath, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    char mime[24];
+    std::strncpy(mime, snapshot.originalMime, sizeof(mime) - 1);
+    mime[sizeof(mime) - 1] = '\0';
+    char title[store::kTitleLen + 1];
+    std::strncpy(title, snapshot.title, sizeof(title) - 1);
+    title[sizeof(title) - 1] = '\0';
+    uint32_t bytes = snapshot.originalBytes;
+
+    if (!client.uploadOriginal(jobId, path, mime, title, bytes)) {
+      continue;  // retried next wake -- drainApprovalOutbox()'s guard below keeps waiting for this
+    }
+
+    SdMan.remove(path);
+    store::JobEntry* entry = jobs_.find(jobId);
+    if (entry != nullptr) {
+      entry->originalPending = false;
+      entry->originalPath[0] = '\0';
+      entry->originalMime[0] = '\0';
+      entry->originalBytes = 0;
+    }
+    summary.originalsUploaded++;
+    changed = true;
+  }
+
+  if (changed) store::saveJobIndex(jobs_);
+}
+
 void SyncManager::drainApprovalOutbox(net::SyncClient& client, SyncSummary& summary) {
   if (outbox_.count() == 0) return;
 
@@ -165,6 +213,14 @@ void SyncManager::drainApprovalOutbox(net::SyncClient& client, SyncSummary& summ
   for (size_t i = 0; i < outbox_.count(); i++) {
     const store::ApprovalEntry& entry = outbox_.at(i);
     if (entry.synced) continue;
+
+    // A Print/Keep/Delete approval for a locally-created job (see
+    // ui/WebUiServer.cpp's /api/upload/xtc) must never reach the Pi —
+    // directly or via relay — before the Pi actually has the document to
+    // act on. uploadPendingOriginals() above clears originalPending once
+    // that upload succeeds; until then, this entry just waits.
+    const store::JobEntry* job = jobs_.find(entry.jobId);
+    if (job != nullptr && job->originalPending) continue;
 
     net::ApprovalSubmitResult result = client.submitApproval(entry, endpoint);
     if (result.applied) {

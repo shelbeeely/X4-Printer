@@ -101,6 +101,16 @@ class SyncClient {
 
   ApprovalSubmitResult submitApproval(const store::ApprovalEntry& entry, Endpoint endpoint);
 
+  // docs/protocol.md §1.7: hands a locally-created job's original image
+  // bytes (SD file at `path`) to the Pi under this device's own `jobId`,
+  // so the Pi's normal conversion pipeline can ingest it under the same
+  // id this device already has an approval queued against (see
+  // sync/SyncManager.cpp's uploadPendingOriginals()). Streams straight
+  // from the open SD file (same "never buffer a whole file" discipline
+  // downloadJobToSd's reverse direction follows) — Pi-direct only, never
+  // attempted over the relay (the relay never sees document bytes).
+  bool uploadOriginal(const char* jobId, const char* path, const char* mime, const char* title, uint32_t bytes);
+
  private:
   const config::DeviceConfigData& cfg_;
 

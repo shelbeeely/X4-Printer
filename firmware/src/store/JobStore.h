@@ -58,6 +58,18 @@ struct JobEntry {
   char landscapeXtcSha256[kSha256Len + 1] = {0};
   uint16_t landscapePageCount = 0;
 
+  // Set for a job created locally by the on-device web UI's direct-upload
+  // path (WebUiServer's /api/upload/xtc + /api/upload/original) rather
+  // than downloaded from the Pi. originalPending stays true until
+  // SyncManager::uploadPendingOriginals() successfully hands the original
+  // image bytes at originalPath to the Pi under this same job_id — until
+  // then, drainApprovalOutbox() must not sync any approval for this job,
+  // since the Pi doesn't have anything to print yet.
+  bool originalPending = false;
+  char originalPath[kPathLen + 1] = {0};
+  char originalMime[24] = {0};  // "image/jpeg" | "image/png"
+  uint32_t originalBytes = 0;
+
   bool jobIdEquals(const char* other) const { return std::strncmp(jobId, other, kJobIdLen) == 0; }
 };
 

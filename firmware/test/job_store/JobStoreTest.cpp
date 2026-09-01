@@ -29,6 +29,14 @@ JobEntry makeEntry(int n) {
     std::snprintf(e.landscapeXtcSha256, sizeof(e.landscapeXtcSha256), "landscapesha%d", n);
     e.landscapePageCount = 2;
   }
+  // Every third n simulates a locally-uploaded job still awaiting the
+  // original's upload to the Pi (JobStore.h's originalPending fields).
+  if (n % 3 == 0) {
+    e.originalPending = true;
+    std::snprintf(e.originalPath, sizeof(e.originalPath), "/inbox/%s_orig.jpg", e.jobId);
+    std::snprintf(e.originalMime, sizeof(e.originalMime), "image/jpeg");
+    e.originalBytes = 3000 + n;
+  }
   return e;
 }
 
@@ -65,6 +73,21 @@ int main() {
   CHECK(withoutLandscape->landscapeXtcBytes == 0);
   CHECK(withoutLandscape->landscapeXtcSha256[0] == '\0');
   CHECK(withoutLandscape->landscapePageCount == 0);
+
+  // originalPending fields (locally-uploaded jobs awaiting Pi upload)
+  // survive upsert/find unchanged, for both a job that has one pending
+  // and one that doesn't.
+  char expectedOriginalPath[store::kPathLen + 1];
+  std::snprintf(expectedOriginalPath, sizeof(expectedOriginalPath), "/inbox/%s_orig.jpg", expected0.jobId);
+  CHECK(withLandscape->originalPending == true);
+  CHECK(std::strcmp(withLandscape->originalPath, expectedOriginalPath) == 0);
+  CHECK(std::strcmp(withLandscape->originalMime, "image/jpeg") == 0);
+  CHECK(withLandscape->originalBytes == 3000);
+
+  CHECK(withoutLandscape->originalPending == false);
+  CHECK(withoutLandscape->originalPath[0] == '\0');
+  CHECK(withoutLandscape->originalMime[0] == '\0');
+  CHECK(withoutLandscape->originalBytes == 0);
 
   // One more distinct job must be rejected (capacity bound from
   // docs/architecture.md "Memory budget" — never silently grows).

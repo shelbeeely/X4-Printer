@@ -10,11 +10,13 @@
 #   - firmware-host-tests: firmware's pure-logic modules built and run as
 #                        plain C++17 (firmware/test), no board required
 #   - xtc-wasm-regenerate-check: rebuilds tools/xtc-wasm/'s WASM decoder
-#     from source and fails if the committed firmware/src/ui/wasm/*
-#     output or the generated firmware/src/ui/XtcDecoderWasmData.h header
-#     has drifted from what a fresh build produces. Unlike the ESP32
-#     firmware build, emscripten installs reliably via apt in CI, so this
-#     is a required check, not a best-effort one.
+#     AND encoder (xtc_decoder.cpp / xtc_encoder.cpp) from source and fails
+#     if the committed firmware/src/ui/wasm/* output or either generated
+#     header (firmware/src/ui/XtcDecoderWasmData.h,
+#     firmware/src/ui/XtcEncoderWasmData.h) has drifted from what a fresh
+#     build produces. Unlike the ESP32 firmware build, emscripten installs
+#     reliably via apt in CI, so this is a required check, not a
+#     best-effort one.
 #   - pages-regenerate-check: reruns firmware/src/ui/pages/
 #     generate_pages_header.py (pure Python, gzips login.html/joblist.html
 #     — no emscripten needed) and fails if the committed
@@ -131,7 +133,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   xtc-wasm-regenerate-check:
-    name: XTC WASM decoder regenerate check
+    name: XTC WASM decoder/encoder regenerate check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -146,11 +148,19 @@ jobs:
       - name: Rebuild WASM decoder
         run: bash tools/xtc-wasm/build.sh
 
-      - name: Regenerate embedded header
+      - name: Regenerate decoder embedded header
         run: python3 firmware/src/ui/wasm/generate_header.py
 
+      - name: Rebuild WASM encoder
+        run: bash tools/xtc-wasm/build_encoder.sh
+
+      - name: Regenerate encoder embedded header
+        run: python3 firmware/src/ui/wasm/generate_encoder_header.py
+
       - name: Fail if committed output has drifted
-        run: git diff --exit-code -- firmware/src/ui/wasm firmware/src/ui/XtcDecoderWasmData.h
+        run: |
+          git diff --exit-code -- firmware/src/ui/wasm \
+            firmware/src/ui/XtcDecoderWasmData.h firmware/src/ui/XtcEncoderWasmData.h
 
   pages-regenerate-check:
     name: X4 web UI pages regenerate check

@@ -13,6 +13,7 @@
 
 #include <cstdint>
 
+#include <SdFat.h>
 #include <WString.h>
 #include <WebServer.h>
 
@@ -21,13 +22,22 @@
 #include "store/JobStore.h"
 
 // Also serves tools/xtc-wasm/'s compiled WASM decoder (embedded via
-// ui/XtcDecoderWasmData.h) and a raw-bytes route for a job's XTC file, so
-// the job list page can decode and preview a page entirely client-side —
-// see ui/pages/joblist.html's script for the fetch/decode glue. Both
-// on-device pages (ui/pages/login.html, ui/pages/joblist.html) and the
-// WASM decoder's .wasm/.js are embedded gzip-compressed (ui/PagesData.h,
-// ui/XtcDecoderWasmData.h) and served via sendGzip() below — see
-// ui/pages/generate_pages_header.py for why.
+// ui/XtcDecoderWasmData.h) and encoder (ui/XtcEncoderWasmData.h) and a
+// raw-bytes route for a job's XTC file, so the job list page can
+// decode/preview a page and encode a phone-picked photo into a new job
+// entirely client-side — see ui/pages/joblist.html's script for the
+// fetch/decode/encode/upload glue. Both on-device pages
+// (ui/pages/login.html, ui/pages/joblist.html) and the WASM
+// decoder/encoder .wasm/.js pairs are embedded gzip-compressed
+// (ui/PagesData.h, ui/XtcDecoderWasmData.h, ui/XtcEncoderWasmData.h) and
+// served via sendGzip() below — see ui/pages/generate_pages_header.py for
+// why.
+//
+// POST /api/upload/xtc and POST /api/upload/original let that same page
+// create a job directly on this device (no Pi involved) and later hand
+// its original image bytes to the Pi on the next real sync — see
+// docs/architecture.md's direct-upload section and
+// sync/SyncManager.cpp's uploadPendingOriginals().
 
 namespace ui {
 
@@ -111,6 +121,30 @@ class WebUiServer {
   char pin_[7] = {0};        // 6 digits + NUL
   char sessionToken_[33] = {0};  // 32 hex chars + NUL, set on successful /login
 
+  // Streaming-upload state for POST /api/upload/xtc, carried from the
+  // per-chunk upload handler (invoked repeatedly while the multipart body
+  // streams in) to the completion handler that runs once the whole
+  // request has been read — see WebUiServer.cpp's handleUploadXtcData()/
+  // handleUploadXtcComplete() for why this can't just be local state.
+  bool uploadXtcAuthorized_ = false;
+  bool uploadXtcTooLarge_ = false;
+  const char* uploadXtcError_ = nullptr;
+  FsFile uploadXtcFile_;
+  char uploadXtcJobId_[store::kJobIdLen + 1] = {0};
+  char uploadXtcPath_[store::kPathLen + 1] = {0};
+  uint32_t uploadXtcBytes_ = 0;
+
+  // Same shape, for POST /api/upload/original (see handleUploadOriginalData()/
+  // handleUploadOriginalComplete()).
+  bool uploadOriginalAuthorized_ = false;
+  bool uploadOriginalTooLarge_ = false;
+  const char* uploadOriginalError_ = nullptr;
+  FsFile uploadOriginalFile_;
+  char uploadOriginalJobId_[store::kJobIdLen + 1] = {0};
+  char uploadOriginalPath_[store::kPathLen + 1] = {0};
+  char uploadOriginalMime_[24] = {0};
+  uint32_t uploadOriginalBytes_ = 0;
+
   void beginCommon();
   void generateSessionSecrets();
   // Not const: WebServer::hasHeader()/header() aren't guaranteed const in
@@ -129,6 +163,12 @@ class WebUiServer {
   void handleApiJobXtc();
   void handleXtcDecoderWasm();
   void handleXtcDecoderJs();
+  void handleXtcEncoderWasm();
+  void handleXtcEncoderJs();
+  void handleUploadXtcData();
+  void handleUploadXtcComplete();
+  void handleUploadOriginalData();
+  void handleUploadOriginalComplete();
   void handleNotFound();
 
   // Shared by every route serving one of the gzip-embedded static assets

@@ -30,7 +30,7 @@ _LP_JOB_ID_RE = re.compile(r"request id is\s+\S+-(\d+)", re.IGNORECASE)
 @dataclass
 class ApprovalResult:
     approval_id: str
-    status: str  # 'applied' | 'already_applied' | 'rejected'
+    status: str  # 'applied' | 'already_applied' | 'rejected' | 'superseded'
     detail: str
     cups_job_id: Optional[int] = None
     error: Optional[str] = None
@@ -118,7 +118,7 @@ def apply_approval(
             # replay_unapplied_approvals below, invoked at startup — this
             # branch is the same replay logic reached synchronously if a
             # retry lands here first).
-            return _finish(db, approval_id, job_id, action, config)
+            return _finish(db, approval_id, job_id, action, received_via, config)
         return ApprovalResult(
             approval_id,
             "already_applied",
@@ -127,10 +127,49 @@ def apply_approval(
             error=existing["error"],
         )
 
-    return _finish(db, approval_id, job_id, action, config)
+    return _finish(db, approval_id, job_id, action, received_via, config)
 
 
-def _finish(db: Database, approval_id: str, job_id: str, action: str, config: Config) -> ApprovalResult:
+def _finish(db: Database, approval_id: str, job_id: str, action: str, received_via: str, config: Config) -> ApprovalResult:
+    # Closes the multi-device duplicate-print gap: two DIFFERENT devices
+    # independently approving the same job each get their own fresh
+    # approval_id, so record_approval_if_new alone treats both as
+    # genuinely new -- without this claim, both would reach the side
+    # effect below and both call submit_to_cups(). This runs for every
+    # path that reaches _finish() -- a brand-new approval, a retry of one
+    # recorded-but-never-applied, and startup replay
+    # (replay_unapplied_approvals) -- so all three get the same guarantee
+    # from one place.
+    #
+    # Scoped narrowly on purpose, not "block any second approval for this
+    # job forever":
+    #   - action == "print" only. Keep/Delete have no irreversible
+    #     physical side effect, so there's nothing to protect -- a single
+    #     device (or the admin console) legitimately changes its mind
+    #     (Keep then Delete) all the time, and that must keep working
+    #     (see test_keep_and_delete_actions_update_status_without_printing).
+    #   - received_via != "admin" only. admin_api.py's job-action handler
+    #     intentionally mints a fresh approval_id for every action,
+    #     including deliberately reprinting an already-printed job -- an
+    #     authenticated human action through a separate, trusted channel
+    #     (docs/security.md "Admin web console"), not the unattended
+    #     device race this guard exists for.
+    # Known v1 limitation, stated explicitly rather than silently
+    # accepted: a single physical/web-UI device that legitimately wants to
+    # print the *same* job a second time (not a race, a deliberate
+    # reprint from that one device) will also be superseded, since a
+    # device-originated print claim is permanent once won. Acceptable for
+    # a personal/small-household scale project -- reprinting is still
+    # possible via the admin console. See db.claim_job_for_finalization()
+    # for why the claim itself is race-free against concurrent requests.
+    if action == "print" and received_via != "admin":
+        if not db.claim_job_for_finalization(job_id, approval_id):
+            winning_id = db.get_job(job_id)["finalizing_approval_id"]
+            error = f"job already finalized by approval {winning_id!r}"
+            db.mark_approval_applied(approval_id, detail="superseded", error=error)
+            logger.info("approval %s for job %s superseded by %s", approval_id, job_id, winning_id)
+            return ApprovalResult(approval_id, "superseded", "superseded", error=error)
+
     try:
         detail, cups_job_id = _apply_side_effect(db, config, job_id=job_id, action=action)
         db.mark_approval_applied(approval_id, detail=detail, cups_job_id=cups_job_id)
@@ -149,5 +188,5 @@ def replay_unapplied_approvals(db: Database, config: Config) -> int:
     pending = db.list_unapplied_approvals()
     for row in pending:
         logger.warning("replaying unapplied approval %s (job=%s action=%s)", row["approval_id"], row["job_id"], row["action"])
-        _finish(db, row["approval_id"], row["job_id"], row["action"], config)
+        _finish(db, row["approval_id"], row["job_id"], row["action"], row["received_via"], config)
     return len(pending)
