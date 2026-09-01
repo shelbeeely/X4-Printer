@@ -1,4 +1,4 @@
-"""Minimal IPP/1.1 receiver so "Xteink X4" shows up in the normal print
+"""Minimal IPP/1.1 receiver so "Focusink" shows up in the normal print
 dialog on Windows, macOS, Linux, Android, and iOS and accepts driverless
 print jobs — no PPD/driver install needed on the client.
 
@@ -35,7 +35,7 @@ from .convert import ConversionError, RenderMode, SUPPORTED_MIME_TYPES, convert_
 from .db import Database
 from .util import sha256_file
 
-logger = logging.getLogger("xteink.ipp")
+logger = logging.getLogger("focusink.ipp")
 
 _PROCESS_STARTED = time.monotonic()
 
@@ -200,7 +200,7 @@ def _job_attributes(printer_uri: str, ipp_job_id: int, job_state: int, job_name:
 
 
 class IppRequestHandler(BaseHTTPRequestHandler):
-    server_version = "XteinkPrintServer/0.1"
+    server_version = "FocusinkServer/0.1"
     protocol_version = "HTTP/1.1"
 
     # Injected by IppServer below.
@@ -297,17 +297,17 @@ class IppRequestHandler(BaseHTTPRequestHandler):
         attrs += _attr_str(VT_KEYWORD, "uri-authentication-supported", "none")
         attrs += _attr_str(VT_KEYWORD, "uri-security-supported", "none")
         attrs += _attr_str(VT_NAME_WITHOUT_LANGUAGE, "printer-name", self.config.printer_name)
-        attrs += _attr_str(VT_TEXT_WITHOUT_LANGUAGE, "printer-info", "Xteink X4 print inbox (via Raspberry Pi)")
+        attrs += _attr_str(VT_TEXT_WITHOUT_LANGUAGE, "printer-info", "Focusink print inbox (via Raspberry Pi)")
         attrs += _attr_str(VT_TEXT_WITHOUT_LANGUAGE, "printer-location", "Home")
         attrs += _attr_str(
-            VT_TEXT_WITHOUT_LANGUAGE, "printer-make-and-model", "Xteink X4 Print Inbox Virtual Printer"
+            VT_TEXT_WITHOUT_LANGUAGE, "printer-make-and-model", "Focusink Virtual Printer"
         )
         attrs += _attr_str(VT_URI, "printer-more-info", info_uri)
         attrs += _attr_str(VT_URI, "printer-uuid", f"urn:uuid:{printer_uuid}")
         attrs += _attr_str(
             VT_TEXT_WITHOUT_LANGUAGE,
             "printer-device-id",
-            "MFG:xteink-print-inbox;MDL:X4 Print Inbox;CMD:PDF,JPEG,PNG;",
+            "MFG:focusink;MDL:Focusink;CMD:PDF,JPEG,PNG;",
         )
         attrs += _attr_str_set(VT_KEYWORD, "ipp-versions-supported", ["1.1", "2.0"])
         ops = [

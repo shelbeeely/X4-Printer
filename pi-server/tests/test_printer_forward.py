@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.printer_forward import apply_approval, replay_unapplied_approvals
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.printer_forward import apply_approval, replay_unapplied_approvals
 
 
 def _insert_job(db: Database, config: Config, title="Doc") -> str:

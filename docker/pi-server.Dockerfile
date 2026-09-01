@@ -1,7 +1,7 @@
 # Same image, two jobs:
 #   1. The recommended production deployment (see docker-compose.yml at
 #      the repo root and docs/setup-pi.md) -- replaces the Python venv +
-#      systemd unit from install/xteink-print-server.service. CUPS and
+#      systemd unit from install/focusink-server.service. CUPS and
 #      avahi-daemon still run on the HOST, not in this container (see
 #      install/docker-host-setup.sh's header comment for why) -- this
 #      image is only ever "run the Python app" now, same as it always was.
@@ -31,15 +31,15 @@ WORKDIR /app
 COPY pi-server/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt pytest
 
-COPY pi-server/xteink_print_server ./xteink_print_server
+COPY pi-server/focusink_server ./focusink_server
 COPY pi-server/tools ./tools
 COPY docker/pi-server-entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-ENV XTEINK_DATA_DIR=/data
+ENV FOCUSINK_DATA_DIR=/data
 VOLUME ["/data"]
 
 EXPOSE 6310 8443 8090
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["python", "-m", "xteink_print_server.server"]
+CMD ["python", "-m", "focusink_server.server"]

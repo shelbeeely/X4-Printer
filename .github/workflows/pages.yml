@@ -26,7 +26,7 @@
 #   succeeded AND produced all three binaries. Its shape is the ESP Web
 #   Tools manifest format:
 #     {
-#       "name": "X4 Print Inbox",
+#       "name": "Focusink",
 #       "version": "<git short sha>",
 #       "builds": [
 #         {
@@ -169,7 +169,7 @@ jobs:
             version="$(git rev-parse --short HEAD)"
             cat > "$dir/manifest.json" <<EOF
           {
-            "name": "X4 Print Inbox",
+            "name": "Focusink",
             "version": "$version",
             "builds": [
               {

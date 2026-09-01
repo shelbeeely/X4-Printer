@@ -1,10 +1,10 @@
 ---
 name: run-pi-server
-description: Build, run, and drive the X4 Print Inbox Pi server (IPP printer listener, X4 sync API, admin console web UI). Use when asked to start pi-server, run/print an IPP job, exercise the sync API, screenshot the admin console, or smoke-test the Pi server end to end.
+description: Build, run, and drive the Focusink Pi server (IPP printer listener, X4 sync API, admin console web UI). Use when asked to start pi-server, run/print an IPP job, exercise the sync API, screenshot the admin console, or smoke-test the Pi server end to end.
 ---
 
 pi-server is a real multi-threaded Python HTTP service (`python -m
-xteink_print_server.server`) with no dev-server/prod split. Drive it via
+focusink_server.server`) with no dev-server/prod split. Drive it via
 `driver.sh` in this skill directory: it launches a real instance, submits a
 real IPP print job, pairs a fake X4 device and syncs+approves through the
 real sync API (`tools/simulate_x4.py`), and screenshots the admin console
@@ -80,7 +80,7 @@ Once a `start`/`smoke` instance is up, drive individual pieces directly:
 
 # Pair a fake X4 + drive the sync API (list/download/verify/ack/approve):
 .venv/bin/python tools/pair_device.py --name "Test X4" --pi-host 127.0.0.1 \
-  --out /tmp/device.json   # needs XTEINK_SYNC_PORT etc. set to match — see driver.sh
+  --out /tmp/device.json   # needs FOCUSINK_SYNC_PORT etc. set to match — see driver.sh
 .venv/bin/python ../tools/simulate_x4.py --pairing-file /tmp/device.json \
   --ca-cert /tmp/run-pi-server-scratch/pi-data/tls/server.crt sync --download-dir /tmp/inbox
 
@@ -97,13 +97,13 @@ top of the script): `RUN_PI_SERVER_IPP_PORT`, `RUN_PI_SERVER_SYNC_PORT`,
 ## Run (human path)
 
 ```bash
-XTEINK_ADMIN_PASSWORD=changeme python3 -m xteink_print_server.server
+FOCUSINK_ADMIN_PASSWORD=changeme python3 -m focusink_server.server
 ```
 
 Blocks in the foreground (real deployments run it under the systemd unit
 in `install/`). `Ctrl-C` to stop. TLS defaults to a **fixed absolute path**
-(`/var/lib/xteink-print-server/tls/...`), not derived from
-`XTEINK_DATA_DIR` — set `XTEINK_TLS_CERT`/`XTEINK_TLS_KEY` explicitly for a
+(`/var/lib/focusink-server/tls/...`), not derived from
+`FOCUSINK_DATA_DIR` — set `FOCUSINK_TLS_CERT`/`FOCUSINK_TLS_KEY` explicitly for a
 non-production data dir, or generate a cert with `tools/gen_selfsigned_cert.py`.
 
 ## Test
@@ -119,8 +119,8 @@ instances) from the repo root with this venv active — 2 pass.
 ## Gotchas
 
 - **TLS cert defaults to a fixed system path, not your data dir.**
-  `Config.tls_cert`/`tls_key` default to `/var/lib/xteink-print-server/tls/...`
-  regardless of `XTEINK_DATA_DIR` — always set `XTEINK_TLS_CERT`/`XTEINK_TLS_KEY`
+  `Config.tls_cert`/`tls_key` default to `/var/lib/focusink-server/tls/...`
+  regardless of `FOCUSINK_DATA_DIR` — always set `FOCUSINK_TLS_CERT`/`FOCUSINK_TLS_KEY`
   explicitly for a scratch/test run (`driver.sh` does this for you).
 - **`gen_selfsigned_cert.py`'s default cert is only valid for the
   container's hostname**, not `127.0.0.1`. Pass `--ip 127.0.0.1` explicitly
@@ -134,14 +134,14 @@ instances) from the repo root with this venv active — 2 pass.
   reliably survive** in some agent harnesses (the process can vanish
   between tool calls with no error). `(cmd &)` in its own subshell, as
   `driver.sh` does, is reliable.
-- **Admin console needs `XTEINK_ADMIN_PASSWORD` set** or the whole admin
+- **Admin console needs `FOCUSINK_ADMIN_PASSWORD` set** or the whole admin
   API thread never starts (`server.py` logs "admin console disabled" and
   moves on) — not an error, just silently absent.
 
 ## Troubleshooting
 
 - **`IsADirectoryError` mentioning `tls`**: you didn't set
-  `XTEINK_TLS_CERT`/`XTEINK_TLS_KEY` and the default path's parent doesn't
+  `FOCUSINK_TLS_CERT`/`FOCUSINK_TLS_KEY` and the default path's parent doesn't
   exist as expected on this machine, or a stray `.` got passed as a path —
   see the TLS gotcha above.
 - **`server did not become ready` from `driver.sh`**: check

@@ -1,4 +1,4 @@
-// Xteink X4 Print Inbox firmware — entry point.
+// Focusink firmware for the Xteink X4 e-paper device — entry point.
 //
 // Implements docs/architecture.md's wake sequence end to end: determine
 // why we woke (power button vs RTC timer), sync (Wi-Fi connect, download

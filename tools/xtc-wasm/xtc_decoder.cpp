@@ -16,7 +16,7 @@
 // rejected here for the same reason XtcReader.cpp rejects them — see
 // docs/xtc-format.md.
 //
-// Bit polarity (confirmed against pi-server/xteink_print_server/
+// Bit polarity (confirmed against pi-server/focusink_server/
 // xtc_writer.py's encode_xtg_page() docstring and
 // firmware/src/xtc/XtcReader.cpp's "0xFF = all-white" comment): bit=1 is a
 // white pixel, bit=0 is black.

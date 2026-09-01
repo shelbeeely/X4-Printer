@@ -1,6 +1,6 @@
-# X4 Print Inbox
+# Focusink
 
-[![Tests](https://github.com/shelbeeely/x4-printer/actions/workflows/tests.yml/badge.svg)](https://github.com/shelbeeely/x4-printer/actions/workflows/tests.yml)
+[![Tests](https://github.com/shelbeeely/focusink/actions/workflows/tests.yml/badge.svg)](https://github.com/shelbeeely/focusink/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Turns an [Xteink X4](https://www.xteink.com/) e-paper device into a
@@ -56,7 +56,7 @@ the exact wire contract between the three components.
 ## Docs & flashing
 
 **Project site (with browser-based firmware flashing):**
-https://shelbeeely.github.io/x4-printer/ — this only goes live once the
+https://shelbeeely.github.io/focusink/ — this only goes live once the
 repo's GitHub Pages source is set to "GitHub Actions" in Settings (a
 one-time manual step).
 
@@ -73,7 +73,7 @@ one-time manual step).
 3. **(Optional) Relay**, for approving prints away from home: `cd relay &&
    sudo ./install/install.sh` — see `docs/relay.md`.
 
-Print from any computer on the network by selecting **"Xteink X4"** in the
+Print from any computer on the network by selecting **"Focusink"** in the
 normal print dialog — nothing else to configure on the client side.
 
 ## Running the tests

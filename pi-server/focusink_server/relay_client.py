@@ -24,7 +24,7 @@ from .config import Config
 from .db import Database
 from .printer_forward import apply_approval
 
-logger = logging.getLogger("xteink.relay_client")
+logger = logging.getLogger("focusink.relay_client")
 
 
 class RelayClient:
@@ -53,7 +53,7 @@ class RelayClient:
 
     def start(self) -> None:
         if not self.enabled:
-            logger.info("relay client disabled (XTEINK_RELAY_URL not configured)")
+            logger.info("relay client disabled (FOCUSINK_RELAY_URL not configured)")
             return
         with self._lifecycle_lock:
             if self._thread is not None and self._thread.is_alive():

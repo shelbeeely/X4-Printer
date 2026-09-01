@@ -1,6 +1,6 @@
 import sqlite3
 
-from xteink_print_server.db import Database, SCHEMA, _ensure_column
+from focusink_server.db import Database, SCHEMA, _ensure_column
 
 
 def _insert_job(

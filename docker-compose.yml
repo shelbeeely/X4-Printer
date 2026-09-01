@@ -1,7 +1,7 @@
-# Production deployment of the Xteink X4 print server -- the recommended
+# Production deployment of the Focusink print server -- the recommended
 # path (see docs/setup-pi.md; "Manual install (no Docker)" there covers
 # the alternative bare-metal systemd install). Replaces the Python venv +
-# systemd unit from pi-server/install/xteink-print-server.service; CUPS
+# systemd unit from pi-server/install/focusink-server.service; CUPS
 # and avahi-daemon still run on the HOST, not in a container -- see
 # pi-server/install/docker-host-setup.sh's header comment for why, and run
 # that script once before this file.
@@ -12,7 +12,7 @@
 #
 # Usage:
 #   sudo ./pi-server/install/docker-host-setup.sh   # one-time: CUPS + avahi on the host, then configure your printer
-#   cp .env.example .env && $EDITOR .env             # fill in XTEINK_CUPS_QUEUE at minimum
+#   cp .env.example .env && $EDITOR .env             # fill in FOCUSINK_CUPS_QUEUE at minimum
 #   docker compose up -d --build
 #
 # On a genuine Raspberry Pi Zero W (512MB RAM), Docker's own overhead is a
@@ -34,13 +34,13 @@ services:
     # as a result (EXPOSE in the Dockerfile is documentation only here).
     network_mode: host
     environment:
-      XTEINK_DATA_DIR: /data
+      FOCUSINK_DATA_DIR: /data
       # Auto-generates a self-signed TLS cert into ./data/tls on first
       # start -- see docker/pi-server-entrypoint.sh. Left unset in
       # docker-compose.test.yml on purpose, see that file.
-      XTEINK_AUTO_TLS: "1"
-      XTEINK_TLS_CERT: /data/tls/server.crt
-      XTEINK_TLS_KEY: /data/tls/server.key
+      FOCUSINK_AUTO_TLS: "1"
+      FOCUSINK_TLS_CERT: /data/tls/server.crt
+      FOCUSINK_TLS_KEY: /data/tls/server.key
       # `lp`/`lpstat` inside this container reach the HOST's cupsd over
       # localhost:631, made possible by network_mode: host above -- not
       # the cross-container CUPS_SERVER story docker-compose.test.yml
@@ -48,16 +48,16 @@ services:
       # compose bridge network, a fundamentally different, still-broken
       # path -- see docs/testing.md).
       CUPS_SERVER: localhost:631
-      XTEINK_CUPS_QUEUE: ${XTEINK_CUPS_QUEUE:-}
-      XTEINK_PRINTER_NAME: ${XTEINK_PRINTER_NAME:-Xteink X4}
-      XTEINK_ADMIN_PASSWORD: ${XTEINK_ADMIN_PASSWORD:-}
-      XTEINK_RELAY_URL: ${XTEINK_RELAY_URL:-}
-      XTEINK_RELAY_ACCOUNT_ID: ${XTEINK_RELAY_ACCOUNT_ID:-}
-      XTEINK_RELAY_ACCOUNT_TOKEN: ${XTEINK_RELAY_ACCOUNT_TOKEN:-}
-      XTEINK_RETENTION_DAYS: ${XTEINK_RETENTION_DAYS:-30}
-      XTEINK_LOG_LEVEL: ${XTEINK_LOG_LEVEL:-INFO}
+      FOCUSINK_CUPS_QUEUE: ${FOCUSINK_CUPS_QUEUE:-}
+      FOCUSINK_PRINTER_NAME: ${FOCUSINK_PRINTER_NAME:-Focusink}
+      FOCUSINK_ADMIN_PASSWORD: ${FOCUSINK_ADMIN_PASSWORD:-}
+      FOCUSINK_RELAY_URL: ${FOCUSINK_RELAY_URL:-}
+      FOCUSINK_RELAY_ACCOUNT_ID: ${FOCUSINK_RELAY_ACCOUNT_ID:-}
+      FOCUSINK_RELAY_ACCOUNT_TOKEN: ${FOCUSINK_RELAY_ACCOUNT_TOKEN:-}
+      FOCUSINK_RETENTION_DAYS: ${FOCUSINK_RETENTION_DAYS:-30}
+      FOCUSINK_LOG_LEVEL: ${FOCUSINK_LOG_LEVEL:-INFO}
     volumes:
       # Everything durable (jobs.db, originals/xtc files, the TLS cert) --
       # one host directory to back up, same "one directory" property
-      # XTEINK_DATA_DIR has under the systemd install.
+      # FOCUSINK_DATA_DIR has under the systemd install.
       - ./data:/data

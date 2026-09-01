@@ -16,12 +16,12 @@ from relay_server.config import RelayConfig  # noqa: E402
 from relay_server.db import RelayDatabase  # noqa: E402
 from relay_server.util import hash_token as relay_hash_token  # noqa: E402
 from relay_server.util import new_token  # noqa: E402
-from xteink_print_server.config import Config  # noqa: E402
-from xteink_print_server.db import Database  # noqa: E402
-from xteink_print_server.ipp_server import IppServer  # noqa: E402
-from xteink_print_server.sync_api import SyncApiServer  # noqa: E402
-from xteink_print_server.util import hash_token as pi_hash_token  # noqa: E402
-from xteink_print_server.util import new_token as pi_new_token  # noqa: E402
+from focusink_server.config import Config  # noqa: E402
+from focusink_server.db import Database  # noqa: E402
+from focusink_server.ipp_server import IppServer  # noqa: E402
+from focusink_server.sync_api import SyncApiServer  # noqa: E402
+from focusink_server.util import hash_token as pi_hash_token  # noqa: E402
+from focusink_server.util import new_token as pi_new_token  # noqa: E402
 
 
 class FakeLpBinary(str):
@@ -32,7 +32,7 @@ class FakeLpBinary(str):
 def fake_lp_binary(tmp_path: Path) -> FakeLpBinary:
     script = tmp_path / "fake_lp"
     log = tmp_path / "fake_lp_calls.log"
-    script.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\necho 'request id is xteink-print-inbox-1 (1 file(s))'\n")
+    script.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\necho 'request id is focusink-1 (1 file(s))'\n")
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     wrapped = FakeLpBinary(str(script))
     wrapped.log_path = log

@@ -285,8 +285,8 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         working-directory: pi-server
         env:
-          XTEINK_DATA_DIR: /tmp/run-pi-server-scratch/pi-data
-          XTEINK_SYNC_PORT: "18443"
+          FOCUSINK_DATA_DIR: /tmp/run-pi-server-scratch/pi-data
+          FOCUSINK_SYNC_PORT: "18443"
           # UNVERIFIED (see docs/testing.md "Wokwi firmware simulation" —
           # this whole job is best-effort): from inside Wokwi's simulated
           # network, "127.0.0.1" is the simulated ESP32's OWN loopback, not

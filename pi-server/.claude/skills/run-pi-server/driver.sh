@@ -46,23 +46,23 @@ do_start() {
 
   (
     cd "$PI_SERVER_DIR"
-    XTEINK_DATA_DIR="$DATA_DIR" \
-    XTEINK_TLS_CERT="$DATA_DIR/tls/server.crt" \
-    XTEINK_TLS_KEY="$DATA_DIR/tls/server.key" \
-    XTEINK_IPP_PORT="$IPP_PORT" \
-    XTEINK_SYNC_PORT="$SYNC_PORT" \
-    XTEINK_ADMIN_PORT="$ADMIN_PORT" \
-    XTEINK_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-    XTEINK_LOG_LEVEL=INFO \
-    "$PY" -m xteink_print_server.server > "$LOG_FILE" 2>&1 &
+    FOCUSINK_DATA_DIR="$DATA_DIR" \
+    FOCUSINK_TLS_CERT="$DATA_DIR/tls/server.crt" \
+    FOCUSINK_TLS_KEY="$DATA_DIR/tls/server.key" \
+    FOCUSINK_IPP_PORT="$IPP_PORT" \
+    FOCUSINK_SYNC_PORT="$SYNC_PORT" \
+    FOCUSINK_ADMIN_PORT="$ADMIN_PORT" \
+    FOCUSINK_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+    FOCUSINK_LOG_LEVEL=INFO \
+    "$PY" -m focusink_server.server > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
   )
 
   for _ in $(seq 1 30); do
-    grep -q "xteink print server ready" "$LOG_FILE" 2>/dev/null && break
+    grep -q "focusink server ready" "$LOG_FILE" 2>/dev/null && break
     sleep 0.5
   done
-  if ! grep -q "xteink print server ready" "$LOG_FILE" 2>/dev/null; then
+  if ! grep -q "focusink server ready" "$LOG_FILE" 2>/dev/null; then
     echo "server did not become ready -- see $LOG_FILE" >&2
     cat "$LOG_FILE" >&2
     exit 1
@@ -96,8 +96,8 @@ do_smoke() {
   echo
   echo "--- pair a fake X4 device ---"
   (cd "$PI_SERVER_DIR" && \
-    XTEINK_DATA_DIR="$DATA_DIR" XTEINK_TLS_CERT="$DATA_DIR/tls/server.crt" XTEINK_TLS_KEY="$DATA_DIR/tls/server.key" \
-    XTEINK_SYNC_PORT="$SYNC_PORT" \
+    FOCUSINK_DATA_DIR="$DATA_DIR" FOCUSINK_TLS_CERT="$DATA_DIR/tls/server.crt" FOCUSINK_TLS_KEY="$DATA_DIR/tls/server.key" \
+    FOCUSINK_SYNC_PORT="$SYNC_PORT" \
     "$PY" tools/pair_device.py --name "Driver Smoke X4" --pi-host 127.0.0.1 --out "$SCRATCH/device.json")
 
   echo

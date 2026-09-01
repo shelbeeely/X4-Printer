@@ -10,7 +10,7 @@ spec, and the firmware-side reader is a from-scratch C++ implementation).
 
 ## What this project produces
 
-`pi-server/xteink_print_server/xtc_writer.py` always emits **XTC** (not
+`pi-server/focusink_server/xtc_writer.py` always emits **XTC** (not
 XTCH): every page is a monochrome **XTG** bitmap (1 bit/pixel, row-major,
 MSB-first), pre-dithered and pre-scaled to the X4's panel resolution
 (800x480, `EInkDisplay::DISPLAY_WIDTH/HEIGHT`).
@@ -33,7 +33,7 @@ This is a deliberate simplification over the full spec:
 - **Metadata is always written** (`hasMetadata = 1`): `title` is the job's
   display name (from the print job's `document-name`/`job-name` IPP
   attribute, or the source filename), `createTime` is the job's creation
-  time, `publisher` is fixed to `"xteink-print-inbox"` so the reader can
+  time, `publisher` is fixed to `"focusink"` so the reader can
   distinguish print-inbox documents from books if the SD card is ever
   shared with CrossPoint Reader.
 

@@ -1,14 +1,15 @@
 <?xml version="1.0" standalone="no"?><!--*-nxml-*-->
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <!--
-  mDNS/DNS-SD advertisement for the Xteink X4 virtual IPP printer
-  (xteink_print_server/ipp_server.py). This is what makes "Xteink X4" show
-  up automatically in Windows/macOS/Linux/Android/iOS print dialogs without
-  any driver install — the same _ipp._tcp + _printer._tcp records a real
-  AirPrint/IPP-Everywhere hardware printer publishes.
+  mDNS/DNS-SD advertisement for Focusink's virtual IPP printer, fronting
+  for the real Xteink X4 e-paper device (focusink_server/ipp_server.py).
+  This is what makes "Focusink" show up automatically in Windows/macOS/
+  Linux/Android/iOS print dialogs without any driver install — the same
+  _ipp._tcp + _printer._tcp records a real AirPrint/IPP-Everywhere
+  hardware printer publishes.
 
   install/install.sh renders this template (substituting @@IPP_PORT@@ and
-  @@PRINTER_NAME@@) to /etc/avahi/services/xteink-x4-ipp.service. Do not
+  @@PRINTER_NAME@@) to /etc/avahi/services/focusink-x4-ipp.service. Do not
   edit the rendered file directly — edit this template and re-run
   install.sh, or the next install/upgrade will overwrite your change.
 -->
@@ -23,8 +24,8 @@
     <txt-record>rp=ipp/print</txt-record>
     <txt-record>ty=@@PRINTER_NAME@@</txt-record>
     <txt-record>adminurl=http://%h/</txt-record>
-    <txt-record>note=Xteink X4 print inbox (via Raspberry Pi)</txt-record>
-    <txt-record>product=(Xteink X4 Print Inbox)</txt-record>
+    <txt-record>note=Focusink print inbox (via Raspberry Pi)</txt-record>
+    <txt-record>product=(Focusink)</txt-record>
     <txt-record>pdl=application/pdf,image/jpeg,image/png</txt-record>
     <txt-record>Color=F</txt-record>
     <txt-record>Duplex=F</txt-record>
@@ -49,7 +50,7 @@
     <port>@@IPP_PORT@@</port>
     <txt-record>txtvers=1</txt-record>
     <txt-record>ty=@@PRINTER_NAME@@</txt-record>
-    <txt-record>product=(Xteink X4 Print Inbox)</txt-record>
+    <txt-record>product=(Focusink)</txt-record>
     <txt-record>rp=ipp/print</txt-record>
   </service>
 </service-group>

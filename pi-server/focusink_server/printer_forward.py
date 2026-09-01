@@ -20,7 +20,7 @@ from typing import Optional
 from .config import Config
 from .db import Database
 
-logger = logging.getLogger("xteink.printer_forward")
+logger = logging.getLogger("focusink.printer_forward")
 
 VALID_ACTIONS = {"print", "keep", "delete"}
 
@@ -46,7 +46,7 @@ def submit_to_cups(config: Config, original_path: str, title: str) -> int:
     so an approval payload can't redirect output to an arbitrary CUPS
     destination."""
     if not config.cups_queue:
-        raise ApprovalError("no CUPS queue configured (XTEINK_CUPS_QUEUE); cannot forward print job")
+        raise ApprovalError("no CUPS queue configured (FOCUSINK_CUPS_QUEUE); cannot forward print job")
 
     cmd = [config.lp_binary, "-d", config.cups_queue, "-t", title, original_path]
     try:

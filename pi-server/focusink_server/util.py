@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from .config import Config
 
-logger = logging.getLogger("xteink.util")
+logger = logging.getLogger("focusink.util")
 
 
 def sha256_file(path, chunk_size: int = 1024 * 1024) -> str:

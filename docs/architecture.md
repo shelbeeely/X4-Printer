@@ -14,7 +14,7 @@ away from home.
                     │   Windows / macOS / Linux / Android / iOS    │
                     └───────────────────────┬───────────────────────┘
                                              │ IPP / AirPrint / driverless
-                                             │ (mDNS: "Xteink X4._ipp._tcp")
+                                             │ (mDNS: "Focusink._ipp._tcp")
                                              ▼
 ┌───────────────────────────── Raspberry Pi Zero W ─────────────────────────────┐
 │  ipp_server.py  ──▶  convert.py (PyMuPDF+Pillow)  ──▶  xtc_writer.py          │
@@ -78,7 +78,7 @@ away from home.
   install: its byte-level IPP attribute encoding (`_ipp_attr*` helpers,
   `Get-Printer-Attributes` response shape, chunked-body handling,
   `document-format` sniffing) is reused almost verbatim in
-  `pi-server/xteink_print_server/ipp_server.py`. This project's IPP server
+  `pi-server/focusink_server/ipp_server.py`. This project's IPP server
   is **narrower** than PaperlessPrinter's: PaperlessPrinter renders the
   incoming document straight to display-native PNGs for an e-paper *client
   device to poll over HTTP*; this project instead (a) retains the original
@@ -322,7 +322,7 @@ extension of it:
   check every other admin-console route already uses; the browser's own
   native password prompt handles it, so neither the X4 nor this page needs
   any client-side auth code for it. This only works at all when the Pi
-  owner has set an admin password (`XTEINK_ADMIN_PASSWORD`) — if not, the
+  owner has set an admin password (`FOCUSINK_ADMIN_PASSWORD`) — if not, the
   link is simply never shown (see below), the same "empty disables"
   pattern the admin console and relay already use.
 - **Wired at pairing time, not discovered at runtime.** `pair_device.py`

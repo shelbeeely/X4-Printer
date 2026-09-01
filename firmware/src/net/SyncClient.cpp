@@ -53,7 +53,7 @@ bool configureClientForEndpoint(WiFiClientSecure& client, Endpoint endpoint) {
   // setCACert/setInsecure call uses ESP-IDF's default verification, which
   // requires setCACertBundle() to have real roots; production deployments
   // should provision /system/relay_ca.pem explicitly (pair_device.py does
-  // this automatically when XTEINK_RELAY_URL is configured — see
+  // this automatically when FOCUSINK_RELAY_URL is configured — see
   // docs/relay.md).
   if (!relayCaLoaded) {
     relayCaLoaded = loadCaCert(kRelayCaPath, relayCa);

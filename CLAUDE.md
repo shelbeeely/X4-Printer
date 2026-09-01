@@ -4,7 +4,7 @@ Guidance for Claude Code sessions working in this repository.
 
 ## Project summary
 
-X4 Print Inbox lets an Xteink X4 e-paper device act as a wireless, offline
+Focusink lets an Xteink X4 e-paper device act as a wireless, offline
 print-approval terminal. A Raspberry Pi Zero W poses as a normal
 IPP/mDNS-discoverable network printer, keeps the original document bytes,
 and converts each job to the X4's native XTC page format. The X4 pulls
@@ -21,7 +21,7 @@ trusts another's retries not to duplicate.
 | Path | What it is | Key entry points |
 |---|---|---|
 | `firmware/` | ESP32-C3 firmware for the X4: sync client, offline reader/approval UI, deep-sleep scheduler. Built on the FreeInk SDK (external library dependency, not vendored). | `firmware/src/main.cpp`, `firmware/src/sync/SyncManager.*`, `firmware/src/net/SyncClient.*`, `firmware/src/store/{JobStore,ApprovalOutbox}.*`, `firmware/platformio.ini` |
-| `pi-server/` | Raspberry Pi print server: IPP/mDNS printer endpoint, PDF→XTC conversion, SQLite job queue, device sync API, CUPS forwarding, relay client. | `pi-server/xteink_print_server/{server,ipp_server,convert,xtc_writer,db,sync_api,printer_forward,relay_client}.py` |
+| `pi-server/` | Raspberry Pi print server: IPP/mDNS printer endpoint, PDF→XTC conversion, SQLite job queue, device sync API, CUPS forwarding, relay client. | `pi-server/focusink_server/{server,ipp_server,convert,xtc_writer,db,sync_api,printer_forward,relay_client}.py` |
 | `relay/` | Optional cloud relay for approving prints away from home; carries approval envelopes (device/job IDs, actions, timestamps) only, never document bytes. | `relay/relay_server/{app,server,db}.py` |
 | `tools/simulate_x4.py` | Fake X4 client speaking the real sync protocol, used by integration tests (and available standalone) to exercise the Pi/relay without hardware. | `tools/simulate_x4.py` |
 | `tests/integration/` | End-to-end tests: real IPP + sync API + relay server instances, a fake CUPS `lp`, and `tools/simulate_x4.py` driving the full pipeline. | `tests/integration/test_end_to_end.py`, `tests/integration/conftest.py` |
@@ -124,7 +124,7 @@ cd firmware && pio run -e wokwi_sync_test
   shells out to `lp -d <configured-queue>`, where the queue name comes from
   install-time configuration, never from a request. Why: prevents command
   injection or queue-redirection via a crafted approval/job. See
-  `pi-server/xteink_print_server/printer_forward.py` and
+  `pi-server/focusink_server/printer_forward.py` and
   `docs/architecture.md` "Security model".
 
 ## Docs map

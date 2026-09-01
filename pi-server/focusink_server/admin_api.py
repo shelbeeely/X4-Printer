@@ -48,7 +48,7 @@ from .printer_forward import apply_approval
 from .relay_client import RelayClient
 from .util import constant_time_eq, hash_token, new_token, serve_with_optional_tls
 
-logger = logging.getLogger("xteink.admin_api")
+logger = logging.getLogger("focusink.admin_api")
 
 MAX_BODY_BYTES = 8192
 
@@ -90,7 +90,7 @@ MAX_WIFI_NETWORKS = 8
 
 
 class AdminApiHandler(BaseHTTPRequestHandler):
-    server_version = "XteinkAdminAPI/0.1"
+    server_version = "FocusinkAdminAPI/0.1"
     protocol_version = "HTTP/1.1"
 
     config: Config
@@ -118,7 +118,7 @@ class AdminApiHandler(BaseHTTPRequestHandler):
         if password is None or not constant_time_eq(password, self.config.admin_password):
             body = json.dumps({"error": "unauthorized"}).encode("utf-8")
             self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="X4 Print Inbox admin"')
+            self.send_header("WWW-Authenticate", 'Basic realm="Focusink admin"')
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

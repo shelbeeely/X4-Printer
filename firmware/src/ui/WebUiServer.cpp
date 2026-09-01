@@ -102,7 +102,7 @@ bool WebUiServer::startHotspot() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   const char* base =
-      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0] != '\0') ? deviceConfig_->deviceName : "Xteink X4";
+      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0] != '\0') ? deviceConfig_->deviceName : "Focusink";
   std::snprintf(ssid_, sizeof(ssid_), "%.30s-%02X%02X", base, mac[4], mac[5]);
   randomPassword(password_, sizeof(password_) - 1);
   generateSessionSecrets();
@@ -253,7 +253,7 @@ void WebUiServer::handleApiStatus() {
 
   JsonDocument doc;
   doc["device_name"] =
-      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Xteink X4";
+      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Focusink";
   doc["mode"] = mode_ == WebUiMode::Hotspot ? "hotspot" : "station";
   size_t total = jobs_ != nullptr ? jobs_->count() : 0;
   size_t unread = 0;
@@ -302,7 +302,7 @@ void WebUiServer::handleApiDiag() {
 
   JsonDocument doc;
   doc["device_name"] =
-      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Xteink X4";
+      (deviceConfig_ != nullptr && deviceConfig_->deviceName[0]) ? deviceConfig_->deviceName : "Focusink";
   doc["device_id"] = deviceConfig_ != nullptr ? deviceConfig_->deviceId : "";
   doc["panel_width"] = panelWidth_;
   doc["panel_height"] = panelHeight_;
@@ -315,7 +315,7 @@ void WebUiServer::handleApiDiag() {
   doc["sd_total_bytes"] = sdTotal;
   doc["sd_free_bytes"] = sdTotal >= sdUsed ? sdTotal - sdUsed : 0;
 
-  // X4 is an ADC-backed board (BoardConfig::XTEINK_X4 has no charge-status
+  // X4 is an ADC-backed board (BoardConfig::@@KEEP_FOCUSINK_X4@@ has no charge-status
   // pin), so percentage/millivolts are the only fields this hardware can
   // report -- chargingKnown/externalPowerKnown always come back false here,
   // not a bug in this call. Omit rather than send a misleading always-false

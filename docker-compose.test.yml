@@ -49,8 +49,8 @@ services:
       # loop has been exhausted on this one (see this file's and
       # entrypoint.sh's git history for the 7 attempts that got this far).
       CUPS_SERVER: cups
-      XTEINK_CUPS_QUEUE: PDF
-      XTEINK_LP_BINARY: lp
+      FOCUSINK_CUPS_QUEUE: PDF
+      FOCUSINK_LP_BINARY: lp
     depends_on:
       cups:
         condition: service_healthy

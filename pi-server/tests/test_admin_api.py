@@ -7,11 +7,11 @@ import urllib.request
 
 import pytest
 
-from xteink_print_server.admin_api import AdminApiServer
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.relay_client import RelayClient
-from xteink_print_server.util import hash_token, sha256_file
+from focusink_server.admin_api import AdminApiServer
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.relay_client import RelayClient
+from focusink_server.util import hash_token, sha256_file
 
 DEVICE_ID = "dev-test1"
 DEVICE_TOKEN = "supersecrettoken"
@@ -457,7 +457,7 @@ def test_static_index_served(running_admin_api):
     root = base.rsplit("/api/", 1)[0]
     resp = _get(f"{root}/")
     body = resp.read().decode()
-    assert "X4 Print Inbox" in body
+    assert "Focusink" in body
     assert resp.headers["Content-Type"].startswith("text/html")
 
 

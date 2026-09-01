@@ -22,14 +22,14 @@ from .db import Database
 from .printer_forward import apply_approval
 from .util import constant_time_eq, hash_token, serve_with_optional_tls
 
-logger = logging.getLogger("xteink.sync_api")
+logger = logging.getLogger("focusink.sync_api")
 
 MAX_APPROVAL_BODY_BYTES = 8192
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class SyncApiHandler(BaseHTTPRequestHandler):
-    server_version = "XteinkSyncAPI/0.1"
+    server_version = "FocusinkSyncAPI/0.1"
     protocol_version = "HTTP/1.1"
 
     config: Config

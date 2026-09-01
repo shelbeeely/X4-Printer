@@ -251,7 +251,7 @@ and previews on the LAN only.
 The X4 reads the exact upstream format documented by
 [phrozen/xtx SPEC.md](https://github.com/phrozen/xtx/blob/main/SPEC.md) — see
 `docs/xtc-format.md` for the summary this project relies on and the specific
-subset `pi-server/xteink_print_server/xtc_writer.py` emits (monochrome XTG
+subset `pi-server/focusink_server/xtc_writer.py` emits (monochrome XTG
 pages only; XTCH/grayscale is read-compatible in firmware but not produced by
 the converter, see that doc for the rationale).
 

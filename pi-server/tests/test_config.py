@@ -14,12 +14,12 @@ import json
 import stat
 from pathlib import Path
 
-from xteink_print_server.config import Config, load_config, save_runtime_overrides
+from focusink_server.config import Config, load_config, save_runtime_overrides
 
 
 def _config(data_dir: Path) -> Config:
     # Config.tls_cert/tls_key default to a fixed system path
-    # (/var/lib/xteink-print-server/tls/...), NOT derived from data_dir --
+    # (/var/lib/focusink-server/tls/...), NOT derived from data_dir --
     # see pi-server/.claude/skills/run-pi-server/SKILL.md's TLS gotcha.
     # ensure_dirs() tries to mkdir that path's parent, which a real (non-root)
     # CI runner can't write to -- every test here must override it to stay
@@ -41,7 +41,7 @@ def test_saved_overrides_survive_a_fresh_load(tmp_path):
     # data_dir, loaded the same way server.py does at startup.
     restarted = _config(data_dir)
     restarted.ensure_dirs()
-    from xteink_print_server.config import _apply_runtime_overrides
+    from focusink_server.config import _apply_runtime_overrides
 
     _apply_runtime_overrides(restarted)
 
@@ -72,10 +72,10 @@ def test_settings_file_is_written_owner_only(tmp_path):
 
 def test_load_config_ignores_corrupt_settings_file(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
-    monkeypatch.setenv("XTEINK_DATA_DIR", str(data_dir))
-    monkeypatch.setenv("XTEINK_CUPS_QUEUE", "EnvDefaultPrinter")
-    monkeypatch.setenv("XTEINK_TLS_CERT", str(data_dir / "tls" / "server.crt"))
-    monkeypatch.setenv("XTEINK_TLS_KEY", str(data_dir / "tls" / "server.key"))
+    monkeypatch.setenv("FOCUSINK_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("FOCUSINK_CUPS_QUEUE", "EnvDefaultPrinter")
+    monkeypatch.setenv("FOCUSINK_TLS_CERT", str(data_dir / "tls" / "server.crt"))
+    monkeypatch.setenv("FOCUSINK_TLS_KEY", str(data_dir / "tls" / "server.key"))
     cfg = Config()
     cfg.ensure_dirs()
     cfg.admin_settings_path.write_text("{not valid json")

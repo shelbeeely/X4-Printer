@@ -6,7 +6,7 @@
 # Why this exists at all instead of putting everything in the container:
 # CUPS needs real USB/network access to your physical printer's driver,
 # and avahi-daemon needs the host's actual network stack/D-Bus for mDNS
-# advertisement (the "Xteink X4" entry in print dialogs) -- containerizing
+# advertisement (the "Focusink" entry in print dialogs) -- containerizing
 # either would trade a real simplification for a lot of fragility (device
 # passthrough, D-Bus socket mounts) for something this small. So CUPS and
 # avahi stay host packages under BOTH the Docker and manual-install paths;
@@ -25,8 +25,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
-PRINTER_NAME="${XTEINK_PRINTER_NAME:-Xteink X4}"
-IPP_PORT="${XTEINK_IPP_PORT:-6310}"
+PRINTER_NAME="${FOCUSINK_PRINTER_NAME:-Focusink}"
+IPP_PORT="${FOCUSINK_IPP_PORT:-6310}"
 
 echo "==> Installing system packages (CUPS + avahi -- see this script's header comment for why these stay host packages)"
 apt-get update -qq
@@ -39,8 +39,8 @@ sed \
   -e "s/@@PRINTER_NAME@@/${PRINTER_NAME}/g" \
   -e "s/@@IPP_PORT@@/${IPP_PORT}/g" \
   -e "s/@@PRINTER_UUID@@/${PRINTER_UUID}/g" \
-  "$SOURCE_DIR/install/avahi/xteink-x4-ipp.service.template" \
-  > /etc/avahi/services/xteink-x4-ipp.service
+  "$SOURCE_DIR/install/avahi/focusink-x4-ipp.service.template" \
+  > /etc/avahi/services/focusink-x4-ipp.service
 systemctl restart avahi-daemon
 
 echo
@@ -53,8 +53,8 @@ echo "     lpinfo -v                      # list detected printers"
 echo "     lpadmin -p MyPrinter -E -v <device-uri-from-above> -m everywhere"
 echo "   or use the CUPS web UI: http://$(hostname -I 2>/dev/null | awk '{print $1}'):631/admin"
 echo
-echo "2. cd $SOURCE_DIR/.. && cp .env.example .env, fill in XTEINK_CUPS_QUEUE"
-echo "   with the queue name from step 1 (and XTEINK_ADMIN_PASSWORD /"
+echo "2. cd $SOURCE_DIR/.. && cp .env.example .env, fill in FOCUSINK_CUPS_QUEUE"
+echo "   with the queue name from step 1 (and FOCUSINK_ADMIN_PASSWORD /"
 echo "   relay settings if you want those -- see docs/setup-pi.md)."
 echo
 echo "3. docker compose up -d --build"

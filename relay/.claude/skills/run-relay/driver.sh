@@ -29,9 +29,9 @@ do_start() {
 
   (
     cd "$RELAY_DIR"
-    XTEINK_RELAY_DATA_DIR="$DATA_DIR" \
-    XTEINK_RELAY_PORT="$PORT" \
-    XTEINK_RELAY_LOG_LEVEL=INFO \
+    FOCUSINK_RELAY_DATA_DIR="$DATA_DIR" \
+    FOCUSINK_RELAY_PORT="$PORT" \
+    FOCUSINK_RELAY_LOG_LEVEL=INFO \
     python3 -m relay_server.server > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
   )
@@ -47,7 +47,7 @@ do_start() {
   fi
 
   if [ ! -f "$ACCOUNT_FILE" ]; then
-    OUT=$(cd "$RELAY_DIR" && XTEINK_RELAY_DATA_DIR="$DATA_DIR" python3 tools/create_account.py --name "Driver Smoke Household")
+    OUT=$(cd "$RELAY_DIR" && FOCUSINK_RELAY_DATA_DIR="$DATA_DIR" python3 tools/create_account.py --name "Driver Smoke Household")
     ACCOUNT_ID=$(echo "$OUT" | grep "account_id:" | awk '{print $2}')
     ACCOUNT_TOKEN=$(echo "$OUT" | grep "account_token:" | awk '{print $2}')
     echo "ACCOUNT_ID=$ACCOUNT_ID" > "$ACCOUNT_FILE"

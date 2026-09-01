@@ -1,6 +1,6 @@
 ---
 name: run-relay
-description: Build, run, and drive the X4 Print Inbox cloud relay (store-and-forward approval-envelope API). Use when asked to start the relay, exercise its approval endpoints, or smoke-test the relay end to end.
+description: Build, run, and drive the Focusink cloud relay (store-and-forward approval-envelope API). Use when asked to start the relay, exercise its approval endpoints, or smoke-test the relay end to end.
 ---
 
 The relay is a real, pure-stdlib Python HTTP service (`python -m
@@ -112,7 +112,7 @@ python3 -m pytest -q
 
 - **`IsADirectoryError` on startup**: you're running a version of
   `config.py` predating the fix above, or something is passing a literal
-  `.`/empty string as `XTEINK_RELAY_TLS_CERT`/`KEY`. Leave both unset for
+  `.`/empty string as `FOCUSINK_RELAY_TLS_CERT`/`KEY`. Leave both unset for
   plaintext, or point them at a real cert/key pair.
 - **`relay did not start` from `driver.sh`**: check
   `/tmp/run-relay-scratch/relay.log` — usually the port is already in use

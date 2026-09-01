@@ -1,7 +1,7 @@
 """Entrypoint: wires up the DB, IPP listener, sync API, and relay poller.
 
-Run directly (``python -m xteink_print_server.server``) or via the systemd
-unit in install/xteink-print-server.service.
+Run directly (``python -m focusink_server.server``) or via the systemd
+unit in install/focusink-server.service.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from .printer_forward import replay_unapplied_approvals
 from .relay_client import RelayClient
 from .sync_api import run_sync_api
 
-logger = logging.getLogger("xteink.server")
+logger = logging.getLogger("focusink.server")
 
 
 def main() -> None:
@@ -27,7 +27,7 @@ def main() -> None:
 
     configure_logging(config.log_level)
 
-    logger.info("starting xteink print server, data dir %s", config.data_dir)
+    logger.info("starting focusink server, data dir %s", config.data_dir)
     db = Database(config.db_path)
 
     replayed = replay_unapplied_approvals(db, config)
@@ -56,7 +56,7 @@ def main() -> None:
         )
         admin_thread.start()
     else:
-        logger.info("admin console disabled (XTEINK_ADMIN_PASSWORD not configured)")
+        logger.info("admin console disabled (FOCUSINK_ADMIN_PASSWORD not configured)")
         admin_ready.set()
 
     relay.start()
@@ -64,7 +64,7 @@ def main() -> None:
     ipp_ready.wait(timeout=10)
     sync_ready.wait(timeout=10)
     admin_ready.wait(timeout=10)
-    logger.info("xteink print server ready")
+    logger.info("focusink server ready")
 
     stop_event = threading.Event()
 
@@ -77,7 +77,7 @@ def main() -> None:
 
     stop_event.wait()
     relay.stop()
-    logger.info("xteink print server stopped")
+    logger.info("focusink server stopped")
 
 
 if __name__ == "__main__":

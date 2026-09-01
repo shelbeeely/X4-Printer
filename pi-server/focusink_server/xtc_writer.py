@@ -42,7 +42,7 @@ META_AUTHOR_SIZE = 64
 META_PUBLISHER_SIZE = 32
 META_LANGUAGE_SIZE = 16
 
-PUBLISHER_TAG = "xteink-print-inbox"
+PUBLISHER_TAG = "focusink"
 
 
 def _row_bytes(width: int) -> int:

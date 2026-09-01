@@ -165,7 +165,7 @@ def test_remote_approval_via_relay_reaches_printer_exactly_once(pi_stack, relay_
     # The Pi's relay poller (outbound-only, docs/protocol.md §2.2) picks it
     # up and applies it through the exact same idempotent code path as the
     # direct sync API.
-    from xteink_print_server.relay_client import RelayClient
+    from focusink_server.relay_client import RelayClient
 
     pi_stack["config"].relay_url = relay_stack["base_url"].rsplit("/relay/v1", 1)[0]
     pi_stack["config"].relay_account_id = relay_stack["account_id"]

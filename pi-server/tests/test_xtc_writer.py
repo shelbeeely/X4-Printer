@@ -4,7 +4,7 @@ import struct
 import pytest
 from PIL import Image
 
-from xteink_print_server.xtc_writer import (
+from focusink_server.xtc_writer import (
     XTC_HEADER_SIZE,
     ConversionError,
     XtcMetadata,
@@ -55,7 +55,7 @@ def test_encode_xtc_header_offsets_and_roundtrip():
     title_bytes = data[meta_off : meta_off + 128]
     assert title_bytes.split(b"\x00", 1)[0] == b"My Doc"
     publisher_bytes = data[meta_off + 0xC0 : meta_off + 0xC0 + 32]
-    assert publisher_bytes.split(b"\x00", 1)[0] == b"xteink-print-inbox"
+    assert publisher_bytes.split(b"\x00", 1)[0] == b"focusink"
 
     # Every page index entry must point at a valid embedded XTG header.
     for i in range(3):

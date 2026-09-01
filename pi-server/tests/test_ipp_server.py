@@ -6,9 +6,9 @@ import urllib.request
 import pytest
 
 from tests.conftest import make_test_pdf
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.ipp_server import (
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.ipp_server import (
     IPP_OP_GET_PRINTER_ATTRIBUTES,
     IPP_OP_PRINT_JOB,
     IppServer,
@@ -61,7 +61,7 @@ def test_get_printer_attributes_returns_ok_and_printer_name(running_ipp_server):
         body = resp.read()
     status_code = struct.unpack(">H", body[2:4])[0]
     assert status_code == 0x0000
-    assert b"Xteink X4" in body
+    assert b"Focusink" in body
 
 
 def test_print_job_ingests_document_and_stores_original(running_ipp_server):

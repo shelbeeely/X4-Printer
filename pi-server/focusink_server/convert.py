@@ -25,7 +25,7 @@ from PIL import Image
 
 from .xtc_writer import ConversionError, XtcMetadata, encode_xtc, prepare_landscape_strip_images, prepare_page_image
 
-logger = logging.getLogger("xteink.convert")
+logger = logging.getLogger("focusink.convert")
 
 MAX_PAGE_COUNT = 500  # 500 * 48000 B (X4 panel-sized XTG page) ~= 24MB worst case
 

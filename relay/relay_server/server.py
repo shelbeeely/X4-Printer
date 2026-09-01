@@ -1,5 +1,5 @@
 """Entrypoint for the relay. Run directly
-(``python -m relay_server.server``) or via install/xteink-relay.service."""
+(``python -m relay_server.server``) or via install/focusink-relay.service."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .config import load_config
 from .db import RelayDatabase
 from .util import configure_logging
 
-logger = logging.getLogger("xteink.relay.server")
+logger = logging.getLogger("focusink.relay.server")
 
 PRUNE_INTERVAL_SECONDS = 3600
 
@@ -31,7 +31,7 @@ def _prune_loop(db: RelayDatabase, retention_days: int, stop: threading.Event) -
 def main() -> None:
     config = load_config()
     configure_logging(config.log_level)
-    logger.info("starting xteink relay, data dir %s", config.data_dir)
+    logger.info("starting focusink relay, data dir %s", config.data_dir)
 
     db = RelayDatabase(config.db_path)
     server = RelayServer(config, db)
@@ -44,7 +44,7 @@ def main() -> None:
         logger.info("relay listening on https://%s:%d", config.host, config.port)
     else:
         logger.warning(
-            "TLS not configured (XTEINK_RELAY_TLS_CERT/KEY) — relay running WITHOUT TLS. "
+            "TLS not configured (FOCUSINK_RELAY_TLS_CERT/KEY) — relay running WITHOUT TLS. "
             "Only acceptable behind a TLS-terminating reverse proxy (nginx/caddy) on the same host, "
             "never exposed to the internet in plaintext."
         )
@@ -62,7 +62,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
 
     server.serve_forever()
-    logger.info("xteink relay stopped")
+    logger.info("focusink relay stopped")
 
 
 if __name__ == "__main__":

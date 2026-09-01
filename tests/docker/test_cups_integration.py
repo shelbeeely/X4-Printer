@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.printer_forward import ApprovalError, apply_approval, submit_to_cups
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.printer_forward import ApprovalError, apply_approval, submit_to_cups
 
 OUTPUT_DIR = Path("/output")
 POLL_TIMEOUT_S = 30
@@ -33,8 +33,8 @@ POLL_TIMEOUT_S = 30
 def config(tmp_path: Path) -> Config:
     cfg = Config(
         data_dir=tmp_path / "data",
-        cups_queue=os.environ.get("XTEINK_CUPS_QUEUE", "PDF"),
-        lp_binary=os.environ.get("XTEINK_LP_BINARY", "lp"),
+        cups_queue=os.environ.get("FOCUSINK_CUPS_QUEUE", "PDF"),
+        lp_binary=os.environ.get("FOCUSINK_LP_BINARY", "lp"),
     )
     cfg.ensure_dirs()
     return cfg
@@ -79,7 +79,7 @@ def test_submit_to_cups_produces_a_real_pdf(config: Config, tmp_path: Path):
     before = {p.name for p in OUTPUT_DIR.iterdir()} if OUTPUT_DIR.is_dir() else set()
 
     doc = tmp_path / "doc.txt"
-    doc.write_text("Hello from the X4 Print Inbox docker CUPS integration test.\n")
+    doc.write_text("Hello from the Focusink docker CUPS integration test.\n")
 
     cups_job_id = submit_to_cups(config, str(doc), "Docker CUPS Integration Test")
     assert cups_job_id >= 0
@@ -121,7 +121,7 @@ def test_apply_approval_print_action_reaches_real_cups(config: Config, db: Datab
 
 
 def test_submit_to_cups_missing_queue_raises_before_touching_lp(tmp_path: Path):
-    cfg = Config(data_dir=tmp_path / "data2", cups_queue="", lp_binary=os.environ.get("XTEINK_LP_BINARY", "lp"))
+    cfg = Config(data_dir=tmp_path / "data2", cups_queue="", lp_binary=os.environ.get("FOCUSINK_LP_BINARY", "lp"))
     cfg.ensure_dirs()
     doc = tmp_path / "doc2.txt"
     doc.write_text("should never be submitted\n")

@@ -6,10 +6,10 @@ import urllib.request
 
 import pytest
 
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.sync_api import SyncApiServer
-from xteink_print_server.util import hash_token
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.sync_api import SyncApiServer
+from focusink_server.util import hash_token
 
 
 DEVICE_ID = "dev-test1"
@@ -19,7 +19,7 @@ DEVICE_TOKEN = "supersecrettoken"
 def _insert_job(db: Database, config: Config, title="Doc") -> str:
     xtc_path = config.xtc_dir / "job1.xtc"
     xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
-    from xteink_print_server.util import sha256_file
+    from focusink_server.util import sha256_file
 
     original_path = config.originals_dir / "job1.pdf"
     original_path.write_bytes(b"%PDF-fake-bytes")

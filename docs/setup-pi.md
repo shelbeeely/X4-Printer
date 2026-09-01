@@ -3,6 +3,20 @@
 Target: Raspberry Pi Zero W (or any Pi/Debian host) running Raspberry Pi OS
 (Bookworm or newer), on the same LAN as the X4.
 
+> **Upgrading from an existing "X4 Print Inbox" install?** This project was
+> renamed to Focusink, and the rename touched every identifier the installer
+> creates: the systemd unit (`xteink-print-server.service` →
+> `focusink-server.service`), install dir (`/opt/xteink-print-server` →
+> `/opt/focusink-server`), data dir (`/var/lib/xteink-print-server` →
+> `/var/lib/focusink-server`), service user (`xteink-print` → `focusink`),
+> and every `XTEINK_*` env var (→ `FOCUSINK_*`). A `git pull` + re-run of
+> `install.sh` creates a *new* service/user/paths rather than updating the
+> old one in place — after confirming the new install works, stop and
+> disable the old unit (`sudo systemctl disable --now
+> xteink-print-server.service`) and either move `/var/lib/xteink-print-server`
+> to the new data dir or point `FOCUSINK_DATA_DIR` at the old path, then
+> remove the old install dir/user.
+
 ## Prerequisites
 
 - A physical network/USB printer already reachable from the Pi (or plugged
@@ -32,7 +46,7 @@ sets up).
 
 ```sh
 git clone <this-repo>
-cd X4-Printer
+cd Focusink
 sudo ./pi-server/install/docker-host-setup.sh
 ```
 
@@ -59,7 +73,7 @@ PPD (see `lpinfo -m` and your printer's model page).
 
 ```sh
 cp .env.example .env
-$EDITOR .env    # at minimum, set XTEINK_CUPS_QUEUE=MyPrinter from step 2
+$EDITOR .env    # at minimum, set FOCUSINK_CUPS_QUEUE=MyPrinter from step 2
 docker compose up -d --build
 ```
 
@@ -73,14 +87,14 @@ separate restart needed, `up` handles it).
 From any machine on the same LAN: open the normal print dialog (macOS
 "Add Printer", Windows "Add a printer or scanner", Linux
 `system-config-printer`/GNOME Settings → Printers, or just print from any
-app). **"Xteink X4"** should appear automatically — no driver install, no
+app). **"Focusink"** should appear automatically — no driver install, no
 IP address to type in. Print a test PDF; it should complete instantly (IPP
 accepts it immediately — the actual physical print only happens once
 approved from the device or, before any device exists yet, never — see
 step 6).
 
 If it doesn't show up: `avahi-browse -a` should list `_ipp._tcp` for
-"Xteink X4 @ <hostname>"; if it doesn't, check `systemctl status
+"Focusink @ <hostname>"; if it doesn't, check `systemctl status
 avahi-daemon` on the host and that the client machine is on the same L2
 segment (mDNS doesn't cross VLANs/subnets without a reflector).
 
@@ -106,7 +120,7 @@ See `docs/relay.md`.
 
 A dashboard for jobs/devices/approvals/calendars/Wi-Fi networks, plus
 live-editable CUPS queue, retention, and relay settings — disabled unless
-`XTEINK_ADMIN_PASSWORD` is set in `.env` (step 3). Once set, open
+`FOCUSINK_ADMIN_PASSWORD` is set in `.env` (step 3). Once set, open
 `http://<pi-host>:8090/` (or `https://` once the TLS cert exists, which it
 will after step 3's first start — see `docker/pi-server-entrypoint.sh`)
 and log in with any username and that password — the browser's own login
@@ -152,14 +166,14 @@ you'd simply rather not run Docker at all.
 
 ```sh
 git clone <this-repo>
-cd X4-Printer/pi-server
+cd Focusink/pi-server
 sudo ./install/install.sh
 ```
 
-This installs CUPS, avahi-daemon, creates a `xteink-print` system user,
-sets up a Python virtualenv at `/opt/xteink-print-server/.venv`, generates a
+This installs CUPS, avahi-daemon, creates a `focusink` system user,
+sets up a Python virtualenv at `/opt/focusink-server/.venv`, generates a
 self-signed TLS certificate for the sync API, installs the mDNS
-advertisement, and starts the `xteink-print-server` systemd service. Full
+advertisement, and starts the `focusink-server` systemd service. Full
 detail: `pi-server/install/install.sh` (it's short — read it before running
 it, as with any installer that needs sudo).
 
@@ -180,18 +194,18 @@ PPD (see `lpinfo -m` and your printer's model page).
 Then tell the print server which queue to use:
 
 ```sh
-sudo systemctl edit xteink-print-server.service
+sudo systemctl edit focusink-server.service
 ```
 
 Add:
 
 ```ini
 [Service]
-Environment=XTEINK_CUPS_QUEUE=MyPrinter
+Environment=FOCUSINK_CUPS_QUEUE=MyPrinter
 ```
 
 ```sh
-sudo systemctl restart xteink-print-server.service
+sudo systemctl restart focusink-server.service
 ```
 
 ### 3. Confirm the virtual printer is visible
@@ -199,22 +213,22 @@ sudo systemctl restart xteink-print-server.service
 From any machine on the same LAN: open the normal print dialog (macOS
 "Add Printer", Windows "Add a printer or scanner", Linux
 `system-config-printer`/GNOME Settings → Printers, or just print from any
-app). **"Xteink X4"** should appear automatically — no driver install, no
+app). **"Focusink"** should appear automatically — no driver install, no
 IP address to type in. Print a test PDF; it should complete instantly (IPP
 accepts it immediately — the actual physical print only happens once
 approved from the device or, before any device exists yet, never — see
 step 5).
 
 If it doesn't show up: `avahi-browse -a` should list `_ipp._tcp` for
-"Xteink X4 @ <hostname>"; if it doesn't, check `systemctl status
+"Focusink @ <hostname>"; if it doesn't, check `systemctl status
 avahi-daemon` and that the client machine is on the same L2 segment (mDNS
 doesn't cross VLANs/subnets without a reflector).
 
 ### 4. Pair your first X4
 
 ```sh
-sudo -u xteink-print /opt/xteink-print-server/.venv/bin/python \
-  /opt/xteink-print-server/tools/pair_device.py \
+sudo -u focusink /opt/focusink-server/.venv/bin/python \
+  /opt/focusink-server/tools/pair_device.py \
   --name "Kitchen X4" --pi-host <pi-lan-ip-or-hostname> --out ./kitchen-x4.json
 ```
 
@@ -222,7 +236,7 @@ This prints a `device_id` and registers it in the server's database. Copy
 the resulting files to the X4's SD card (see `docs/setup-x4.md`):
 
 - `kitchen-x4.json` → `/system/device.json`
-- `/var/lib/xteink-print-server/tls/server.crt` → `/system/pi_ca.pem`
+- `/var/lib/focusink-server/tls/server.crt` → `/system/pi_ca.pem`
 
 ### 5. (Optional) Remote approval away from home
 
@@ -235,18 +249,18 @@ live-editable CUPS queue, retention, and relay settings — disabled unless
 you set a password:
 
 ```sh
-sudo systemctl edit xteink-print-server.service
+sudo systemctl edit focusink-server.service
 ```
 
 Add:
 
 ```ini
 [Service]
-Environment=XTEINK_ADMIN_PASSWORD=<a strong password>
+Environment=FOCUSINK_ADMIN_PASSWORD=<a strong password>
 ```
 
 ```sh
-sudo systemctl restart xteink-print-server.service
+sudo systemctl restart focusink-server.service
 ```
 
 Then open `http://<pi-host>:8090/` (or `https://` once the TLS cert from
@@ -267,7 +281,7 @@ physical device paired, or for CI:
 ```sh
 python3 tools/simulate_x4.py --pi-base-url https://<pi-host>:8443/api/v1 \
   --device-id <from pair_device.py> --device-token <from pair_device.py> \
-  --ca-cert /var/lib/xteink-print-server/tls/server.crt \
+  --ca-cert /var/lib/focusink-server/tls/server.crt \
   list-jobs
 ```
 

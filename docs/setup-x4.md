@@ -242,8 +242,8 @@ Pi's direct sync API isn't reachable on the current network — no separate
 - **Approvals never leave the device**: check that both `/system/pi_ca.pem`
   matches the Pi's *current* certificate (regenerate + re-copy if the Pi's
   hostname/IP changed, see `pi-server/tools/gen_selfsigned_cert.py`) and
-  that the Pi's `xteink-print-server` service is running
-  (`systemctl status xteink-print-server`).
+  that the Pi's `focusink-server` service is running
+  (`systemctl status focusink-server`).
 - **Web UI won't load / wrong PIN**: the PIN and hotspot password are
   regenerated every time you press Web UI — use the one currently shown
   on the device screen, not one from an earlier session.

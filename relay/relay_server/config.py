@@ -29,16 +29,16 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass
 class RelayConfig:
-    data_dir: Path = field(default_factory=lambda: Path(_env_str("XTEINK_RELAY_DATA_DIR", "/var/lib/xteink-relay")))
-    host: str = field(default_factory=lambda: _env_str("XTEINK_RELAY_HOST", "0.0.0.0"))
-    port: int = field(default_factory=lambda: _env_int("XTEINK_RELAY_PORT", 8843))
-    tls_cert: Optional[Path] = field(default_factory=lambda: _env_optional_path("XTEINK_RELAY_TLS_CERT"))
-    tls_key: Optional[Path] = field(default_factory=lambda: _env_optional_path("XTEINK_RELAY_TLS_KEY"))
+    data_dir: Path = field(default_factory=lambda: Path(_env_str("FOCUSINK_RELAY_DATA_DIR", "/var/lib/focusink-relay")))
+    host: str = field(default_factory=lambda: _env_str("FOCUSINK_RELAY_HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: _env_int("FOCUSINK_RELAY_PORT", 8843))
+    tls_cert: Optional[Path] = field(default_factory=lambda: _env_optional_path("FOCUSINK_RELAY_TLS_CERT"))
+    tls_key: Optional[Path] = field(default_factory=lambda: _env_optional_path("FOCUSINK_RELAY_TLS_KEY"))
     # How long a delivered (acked) approval envelope is kept before pruning,
     # purely for operator debugging/audit — the relay never needs it again
     # once delivered=1.
-    retention_days: int = field(default_factory=lambda: _env_int("XTEINK_RELAY_RETENTION_DAYS", 14))
-    log_level: str = field(default_factory=lambda: _env_str("XTEINK_RELAY_LOG_LEVEL", "INFO"))
+    retention_days: int = field(default_factory=lambda: _env_int("FOCUSINK_RELAY_RETENTION_DAYS", 14))
+    log_level: str = field(default_factory=lambda: _env_str("FOCUSINK_RELAY_LOG_LEVEL", "INFO"))
 
     @property
     def db_path(self) -> Path:
