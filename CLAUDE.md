@@ -26,6 +26,7 @@ trusts another's retries not to duplicate.
 | `tools/simulate_x4.py` | Fake X4 client speaking the real sync protocol, used by integration tests (and available standalone) to exercise the Pi/relay without hardware. | `tools/simulate_x4.py` |
 | `tests/integration/` | End-to-end tests: real IPP + sync API + relay server instances, a fake CUPS `lp`, and `tools/simulate_x4.py` driving the full pipeline. | `tests/integration/test_end_to_end.py`, `tests/integration/conftest.py` |
 | `docs/` | Design, protocol, format, and setup documentation — see "Docs map" below. | `docs/architecture.md`, `docs/protocol.md` |
+| `timeboard/` | **Unrelated device, same repo for convenience.** A separate ESP32 (M5StickC Plus2) project — a color-coded-timeline/Pomodoro visual planning tool, not part of the X4 Print Inbox system described above. Shares no code, protocol, or invariants with `firmware/`/`pi-server/`/`relay/`; the rest of this file doesn't apply to it. See `timeboard/README.md`. | `timeboard/src/main.cpp`, `timeboard/README.md` |
 
 ## Build / test commands
 

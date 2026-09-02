@@ -12,6 +12,8 @@ firmware/freeink-sdk/
 
 # C++ host test build
 firmware/test/build/
+timeboard/.pio/
+timeboard/test/build/
 
 # Local data / secrets — never commit a real deployment's state
 pi-server/data/
