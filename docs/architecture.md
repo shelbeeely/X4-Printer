@@ -85,6 +85,16 @@ away from home.
   document bytes untouched (needed later to send the *original*, not a
   preview, to the physical printer) and (b) converts to XTC instead of PNG
   (needed for the X4's own local paging UI, not a browser-side viewer).
+- **`martin-ger/esp32_nat_router`** is the reference for the Hotspot
+  mode's optional internet passthrough (`firmware/src/net/WifiBridge.*`,
+  see "Hotspot internet passthrough" below): the two lwIP sdkconfig
+  options it sets (`CONFIG_LWIP_IP_FORWARD`, `CONFIG_LWIP_IPV4_NAPT`) and
+  its single `ip_napt_enable(ap_ip, 1)` call once the AP and station
+  interfaces are both up. This project does not vendor or link any of its
+  C source — esp32_nat_router is a full standalone ESP-IDF router
+  application (port mapping, firewall, VPN, a web config UI, DHCP
+  reservations) with nothing else this project needs; only the two
+  sdkconfig lines and that one lwIP call are reused.
 - **`phrozen/xtx`** is the authoritative XTC/XTG byte-layout reference. Its
   Go source is not linked into either the Pi server or the firmware —
   `xtc_writer.py` is a from-scratch pure-Python encoder against the same
@@ -216,10 +226,10 @@ easy reach, or (hotspot mode) away from any known network entirely.
 
 - **Explicit, not automatic.** Pressing the button shows a choice — "Use
   Wi-Fi" (joins a saved network via the same `WifiManager::connect()` the
-  normal sync pass uses) or "Use Hotspot" (`WifiManager::startAccessPoint()`
-  broadcasts the device's own SoftAP) — never a silent fallback between
-  them, so a brief home-Wi-Fi drop can't unexpectedly turn the device into
-  a public hotspot.
+  normal sync pass uses) or "Use Hotspot" (`net::WifiBridge::start()`
+  broadcasts the device's own SoftAP, see "Hotspot internet passthrough"
+  below) — never a silent fallback between them, so a brief home-Wi-Fi
+  drop can't unexpectedly turn the device into a public hotspot.
 - **Gated by a fresh PIN.** Every time it's turned on, a new 6-digit PIN is
   generated and shown on the e-ink screen; the phone enters it once
   (`POST /login`) and gets a random session cookie for the rest of that
@@ -235,6 +245,37 @@ easy reach, or (hotspot mode) away from any known network entirely.
   periodic status poll counts as activity, an idle one doesn't, and
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
+
+### Hotspot internet passthrough
+
+Hotspot mode (`net::WifiBridge`, `firmware/src/net/WifiBridge.*`) starts
+the device's own SoftAP the same as before, but also puts the radio in
+`WIFI_AP_STA` and makes a best-effort attempt to join a saved network
+(`WifiManager::joinKnownNetwork()`) as a station at the same time. If that
+succeeds, it enables lwIP's NAT/port-translation stack
+(`ip_napt_enable()`, gated on `CONFIG_LWIP_IP_FORWARD` +
+`CONFIG_LWIP_IPV4_NAPT` — see `firmware/platformio.ini`'s
+`custom_sdkconfig` and the `martin-ger/esp32_nat_router` attribution
+above) so traffic from a phone connected to the hotspot is routed out
+through the station link instead of dead-ending at the X4.
+
+- **Best-effort, never blocking.** If no saved network is visible within
+  the join timeout, the hotspot still comes up exactly as it always did —
+  isolated, "no network beyond the phone." `WebUiServer::hasInternetPassthrough()`
+  reflects whether it actually came up; the Inbox screen's hotspot status
+  line shows `(+Internet)` when it has.
+- **Doesn't touch Station mode or the sync-window Wi-Fi path.** This only
+  changes what `Hotspot` does; `WifiManager::connect()` (used by both the
+  normal sync pass and the Web UI's "Use Wi-Fi" mode) is unchanged —
+  `joinKnownNetwork()` is the scan/match/connect logic `connect()` already
+  had, pulled out so `WifiBridge` can call it without `connect()`'s
+  `WiFi.mode(WIFI_STA)` tearing down the SoftAP it just started.
+- **No new inbound surface on the X4 itself.** NAT only forwards a
+  connected phone's *own* traffic to the internet and back; it doesn't
+  change what can reach the X4's Wi-Fi-facing ports (still just the same
+  `WebServer` on port 80, PIN-gated, torn down by the idle timer). See
+  `docs/security.md` "On-device Web UI" and "Hotspot internet
+  passthrough" for the updated threat-model note.
 
 ### On-device Web UI full-document preview
 
@@ -346,6 +387,7 @@ the FreeInk display framebuffer, and application code. Concretely:
 | Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~4KB typical) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
 | Wi-Fi + TLS (esp_http_client/mbedTLS) | ~40-60KB while connected | Only resident during the sync window (steps 2-8 above); torn down before deep sleep |
 | Web UI (Wi-Fi/SoftAP + `WebServer`, no TLS) | Similar order of magnitude to the sync-window Wi-Fi row above, minus the TLS overhead | Optional — only resident while the "On-device Web UI" feature is manually toggled on; torn down by the same idle timer as the rest of the UI, never during normal (button/timer-wake) operation |
+| Hotspot passthrough NAT (`ip_napt_enable`, `IP_NAPT`) | Fixed-size lwIP NAT table (`IP_NAPT_TABLE_SIZE`/`IP_PORTMAP_MAX` defaults, not resized by this project), plus AP+STA running concurrently instead of one radio mode | Only resident while Hotspot mode is active *and* a saved network was actually joined (`net::WifiBridge::hasUplink()`); same teardown as the Web UI row above |
 
 No component ever holds a full downloaded document, a full XTC file, or more
 than one rendered page in RAM at once — the one and only large fixed buffer

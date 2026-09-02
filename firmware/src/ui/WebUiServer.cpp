@@ -96,7 +96,7 @@ bool WebUiServer::startStation(uint32_t timeoutMs) {
 bool WebUiServer::startHotspot() {
   stop();
 
-  WiFi.mode(WIFI_AP);  // initializes the radio so macAddress() below is valid
+  WiFi.mode(WIFI_AP_STA);  // initializes the radio so macAddress() below is valid
   uint8_t mac[6];
   WiFi.macAddress(mac);
   const char* base =
@@ -105,8 +105,7 @@ bool WebUiServer::startHotspot() {
   randomPassword(password_, sizeof(password_) - 1);
   generateSessionSecrets();
 
-  net::WifiManager wifi;
-  if (!wifi.startAccessPoint(ssid_, password_)) {
+  if (!wifiBridge_.start(ssid_, password_)) {
     mode_ = WebUiMode::Off;
     return false;
   }
@@ -165,10 +164,10 @@ void WebUiServer::beginCommon() {
 void WebUiServer::stop() {
   if (mode_ == WebUiMode::Off) return;
   server_.stop();
-  net::WifiManager wifi;
   if (mode_ == WebUiMode::Hotspot) {
-    wifi.stopAccessPoint();
+    wifiBridge_.stop();
   } else {
+    net::WifiManager wifi;
     wifi.disconnect();
   }
   mode_ = WebUiMode::Off;

@@ -113,7 +113,12 @@ HTTP, and shuts itself off on the same idle timer as everything else).
      is visible; use Hotspot instead.
    - **Use Hotspot** — broadcasts the device's own network (SSID/password
      shown on screen, freshly generated each time) so a phone can connect
-     directly with no router involved.
+     directly with no router involved. If a saved network also happens to
+     be in range, the device joins it in the background and bridges the
+     hotspot to it, so your phone keeps its own internet access instead of
+     losing it for the session — the status line shows `(+Internet)` when
+     this kicked in. See `docs/architecture.md` "Hotspot internet
+     passthrough" and `docs/security.md`'s section of the same name.
 2. The screen then shows a URL and a 6-digit PIN. On your phone: connect
    to the shown network (skip this for Wi-Fi mode if you're already on
    it), open the URL in a browser, and enter the PIN once.

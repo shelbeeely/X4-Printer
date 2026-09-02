@@ -88,6 +88,24 @@ the physical UI.
   path the physical buttons use, so it inherits the same
   `docs/protocol.md` §3 guarantees once it eventually syncs to the Pi.
 
+### Hotspot internet passthrough (`firmware/src/net/WifiBridge.h`/`.cpp`)
+
+When hotspot mode also joins a saved network (see
+`docs/architecture.md` "Hotspot internet passthrough"), anyone who has the
+freshly-generated hotspot WPA2 password gets NAT'd outbound access, not
+just to the internet but to **anything reachable from the X4's station
+link** — in practice, the same home LAN a laptop on that Wi-Fi could
+reach, since `ip_napt_enable()` translates and forwards any outbound
+connection, with no destination allowlist. This is a strictly larger
+grant than plain (non-passthrough) hotspot mode, which is fully isolated
+("no network beyond the phone"). Accepted for the same reason as the PIN
+tradeoff above — the gate is the freshly-generated, on-screen-only WPA2
+password, and this is a manually-toggled, idle-timer-bounded session, not
+an always-on router. It does **not** change the X4's own inbound surface:
+NAT only forwards traffic *originated by* a connected phone, and doesn't
+open any new listening port on the X4 itself (still just the `WebServer`
+on port 80 from the "On-device Web UI" section above).
+
 ## Admin web console (`admin_api.py`)
 
 - **Disabled by default.** `server.py` only starts the listener if

@@ -17,6 +17,7 @@
 #include <WebServer.h>
 
 #include "config/DeviceConfig.h"
+#include "net/WifiBridge.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 
@@ -59,8 +60,12 @@ class WebUiServer {
   bool startStation(uint32_t timeoutMs = 15000);
 
   // Broadcasts this device's own hotspot (a fresh random SSID/password
-  // each time) and starts the server on the AP gateway IP. Returns false
-  // only if the radio itself fails to start.
+  // each time) and starts the server on the AP gateway IP. If a saved
+  // network is also visible, joins it as a station alongside the hotspot
+  // and NATs the hotspot's clients out through it (net::WifiBridge) —
+  // best-effort, see WifiBridge.h; check hasInternetPassthrough() for
+  // whether it came up. Returns false only if the radio itself fails to
+  // start.
   bool startHotspot();
 
   // Stops the HTTP server and tears down whichever radio mode was
@@ -69,6 +74,11 @@ class WebUiServer {
 
   bool isActive() const { return mode_ != WebUiMode::Off; }
   WebUiMode mode() const { return mode_; }
+
+  // True only in Hotspot mode, once net::WifiBridge actually joined a
+  // saved network and enabled passthrough for this session — for the web
+  // UI status screen (ui/InboxUI.cpp's webUiScreen()).
+  bool hasInternetPassthrough() const { return mode_ == WebUiMode::Hotspot && wifiBridge_.hasUplink(); }
 
   // Services at most the currently pending client request. Cheap/non-
   // blocking when idle (WebServer's own behavior) — call every
@@ -97,6 +107,7 @@ class WebUiServer {
   uint32_t wakeMillis_ = 0;
 
   WebServer server_{80};
+  net::WifiBridge wifiBridge_;  // Hotspot mode only — see startHotspot()/stop()
   WebUiMode mode_ = WebUiMode::Off;
   bool activityFlag_ = false;
   // WebServer::on() has no matching "remove handler" call, so routes are

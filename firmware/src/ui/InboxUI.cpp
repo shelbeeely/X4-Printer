@@ -163,7 +163,8 @@ void webUiScreen(App::ScreenType& screen, void* userPtr) {
 
   char subtitle[96];
   if (state.webUiServer.mode() == WebUiMode::Hotspot) {
-    std::snprintf(subtitle, sizeof(subtitle), "Hotspot: %s / %s", state.webUiServer.ssid(), state.webUiServer.password());
+    std::snprintf(subtitle, sizeof(subtitle), "Hotspot: %s / %s%s", state.webUiServer.ssid(), state.webUiServer.password(),
+                  state.webUiServer.hasInternetPassthrough() ? " (+Internet)" : "");
   } else {
     std::snprintf(subtitle, sizeof(subtitle), "Wi-Fi: %s", state.webUiServer.ssid());
   }

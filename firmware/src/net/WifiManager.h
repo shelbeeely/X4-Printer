@@ -21,6 +21,13 @@ class WifiManager {
   // timeoutMs.
   bool connect(uint32_t timeoutMs = 15000);
 
+  // Same scan/match/connect as connect(), but leaves the Wi-Fi mode
+  // exactly as the caller already set it instead of forcing WIFI_STA —
+  // used by net::WifiBridge, which needs WIFI_AP_STA to stay in effect
+  // (setting WIFI_STA would tear down an active softAP). Otherwise
+  // identical, including the false-means-normal-state contract above.
+  bool joinKnownNetwork(uint32_t timeoutMs = 15000);
+
   // Tears down the radio. Always safe to call even if connect() was never
   // called or already failed.
   void disconnect();
@@ -36,16 +43,6 @@ class WifiManager {
   // above, this reads the radio's live state directly rather than
   // remembering a value from connect()'s own internal network scan.
   int32_t rssi() const;
-
-  // Broadcasts this device's own hotspot (WiFi.softAP) — for the on-device
-  // web UI's "mobile, no known network in range" mode (ui/WebUiServer.h).
-  // Unlike connect(), this deliberately does NOT consult WifiStore: it's
-  // an explicit, user-toggled alternative to joining a known network, not
-  // part of the normal sync-window Wi-Fi flow. Default AP gateway
-  // (192.168.4.1) — no custom softAPConfig, same "deliberately minimal"
-  // style as connect()/disconnect() above.
-  bool startAccessPoint(const char* ssid, const char* password);
-  void stopAccessPoint();
 };
 
 }  // namespace net
