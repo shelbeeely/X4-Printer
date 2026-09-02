@@ -19,14 +19,14 @@ from .config import RelayConfig
 from .db import RelayDatabase
 from .util import constant_time_eq, hash_token
 
-logger = logging.getLogger("xteink.relay")
+logger = logging.getLogger("focusink.relay")
 
 MAX_BODY_BYTES = 8192
 VALID_ACTIONS = {"print", "keep", "delete"}
 
 
 class RelayRequestHandler(BaseHTTPRequestHandler):
-    server_version = "XteinkRelay/0.1"
+    server_version = "FocusinkRelay/0.1"
     protocol_version = "HTTP/1.1"
 
     config: RelayConfig

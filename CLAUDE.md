@@ -4,7 +4,7 @@ Guidance for Claude Code sessions working in this repository.
 
 ## Project summary
 
-X4 Print Inbox lets an Xteink X4 e-paper device act as a wireless, offline
+Focusink lets an Xteink X4 e-paper device act as a wireless, offline
 print-approval terminal. A Raspberry Pi Zero W poses as a normal
 IPP/mDNS-discoverable network printer, keeps the original document bytes,
 and converts each job to the X4's native XTC page format. The X4 pulls
@@ -21,7 +21,7 @@ trusts another's retries not to duplicate.
 | Path | What it is | Key entry points |
 |---|---|---|
 | `firmware/` | ESP32-C3 firmware for the X4: sync client, offline reader/approval UI, deep-sleep scheduler. Built on the FreeInk SDK (external library dependency, not vendored). | `firmware/src/main.cpp`, `firmware/src/sync/SyncManager.*`, `firmware/src/net/SyncClient.*`, `firmware/src/store/{JobStore,ApprovalOutbox}.*`, `firmware/platformio.ini` |
-| `pi-server/` | Raspberry Pi print server: IPP/mDNS printer endpoint, PDF→XTC conversion, SQLite job queue, device sync API, CUPS forwarding, relay client. | `pi-server/xteink_print_server/{server,ipp_server,convert,xtc_writer,db,sync_api,printer_forward,relay_client}.py` |
+| `pi-server/` | Raspberry Pi print server: IPP/mDNS printer endpoint, PDF→XTC conversion, SQLite job queue, device sync API, CUPS forwarding, relay client. | `pi-server/focusink_server/{server,ipp_server,convert,xtc_writer,db,sync_api,printer_forward,relay_client}.py` |
 | `relay/` | Optional cloud relay for approving prints away from home; carries approval envelopes (device/job IDs, actions, timestamps) only, never document bytes. | `relay/relay_server/{app,server,db}.py` |
 | `tools/simulate_x4.py` | Fake X4 client speaking the real sync protocol, used by integration tests (and available standalone) to exercise the Pi/relay without hardware. | `tools/simulate_x4.py` |
 | `tests/integration/` | End-to-end tests: real IPP + sync API + relay server instances, a fake CUPS `lp`, and `tools/simulate_x4.py` driving the full pipeline. | `tests/integration/test_end_to_end.py`, `tests/integration/conftest.py` |
@@ -67,6 +67,22 @@ cd firmware && pio run -e xteink_x4 -t upload   # flash
 No lint or CI commands exist in this repository as of this writing — don't
 invent or assume them.
 
+Two additional, slower test layers exist beyond the four commands above —
+see `docs/testing.md` for what each does and how to run it:
+
+```sh
+# Real-CUPS integration test (Docker Compose: pi-server + relay + a real
+# CUPS daemon with a virtual PDF-backed printer)
+docker compose -f docker-compose.test.yml build cups pi-server
+docker compose -f docker-compose.test.yml up -d cups   # wait for it to report healthy
+docker compose -f docker-compose.test.yml run --rm pi-server python -m pytest tests_docker -q
+docker compose -f docker-compose.test.yml down -v
+
+# Wokwi ESP32-C3 simulation of the real on-device sync stack (best-effort,
+# needs a WOKWI_CLI_TOKEN — see docs/testing.md before relying on this)
+cd firmware && pio run -e wokwi_sync_test
+```
+
 ## Invariants
 
 - **Atomic durable writes.** Every durable write — Pi-side SQLite
@@ -108,11 +124,15 @@ invent or assume them.
   shells out to `lp -d <configured-queue>`, where the queue name comes from
   install-time configuration, never from a request. Why: prevents command
   injection or queue-redirection via a crafted approval/job. See
-  `pi-server/xteink_print_server/printer_forward.py` and
+  `pi-server/focusink_server/printer_forward.py` and
   `docs/architecture.md` "Security model".
 
 ## Docs map
 
+- `docs/testing.md` — every test layer in this repo (unit, integration,
+  firmware host tests, the Docker real-CUPS integration test, the
+  best-effort Wokwi on-device sync simulation), how to run each, and
+  what's still a known gap.
 - `docs/architecture.md` — full system design: component responsibilities,
   reference-project attribution and departures, SQLite data model,
   idempotent-approval transaction, wake/sleep sequence, memory budget,
@@ -126,7 +146,9 @@ invent or assume them.
   prototype for home/personal-scale deployment, not a hardened multi-tenant
   product).
 - `docs/setup-pi.md` — walkthrough for provisioning the Raspberry Pi print
-  server, configuring the physical printer in CUPS, and pairing a device.
+  server (Docker Compose, the recommended path, or a manual systemd
+  install), configuring the physical printer in CUPS, and pairing a
+  device.
 - `docs/setup-x4.md` — building/flashing the firmware and provisioning the
   X4's SD card for first boot.
 - `docs/xtc-format.md` — the XTC/XTG byte-layout subset this project

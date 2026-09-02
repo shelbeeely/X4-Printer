@@ -1,5 +1,5 @@
-# Runs the project's six independent test suites (see README.md's
-# "Running the tests" section):
+# Runs the project's test suites (see README.md's "Running the tests"
+# section and docs/testing.md for the full picture):
 #
 #   - pi-server-tests:   Pi server unit tests (pi-server/tests, pytest)
 #   - relay-tests:       Relay unit tests (relay/tests, pytest, stdlib only)
@@ -10,15 +10,31 @@
 #   - firmware-host-tests: firmware's pure-logic modules built and run as
 #                        plain C++17 (firmware/test), no board required
 #   - xtc-wasm-regenerate-check: rebuilds tools/xtc-wasm/'s WASM decoder
-#     from source and fails if the committed firmware/src/ui/wasm/*
-#     output or the generated firmware/src/ui/XtcDecoderWasmData.h header
-#     has drifted from what a fresh build produces. Unlike the ESP32
-#     firmware build, emscripten installs reliably via apt in CI, so this
-#     is a required check, not a best-effort one.
+#     AND encoder (xtc_decoder.cpp / xtc_encoder.cpp) from source and fails
+#     if the committed firmware/src/ui/wasm/* output or either generated
+#     header (firmware/src/ui/XtcDecoderWasmData.h,
+#     firmware/src/ui/XtcEncoderWasmData.h) has drifted from what a fresh
+#     build produces. Unlike the ESP32 firmware build, emscripten installs
+#     reliably via apt in CI, so this is a required check, not a
+#     best-effort one.
 #   - pages-regenerate-check: reruns firmware/src/ui/pages/
 #     generate_pages_header.py (pure Python, gzips login.html/joblist.html
 #     — no emscripten needed) and fails if the committed
 #     firmware/src/ui/PagesData.h has drifted from a fresh run.
+#   - docker-cups-tests: builds docker-compose.test.yml's containers and
+#     runs tests/docker/ against a REAL CUPS daemon (docker/cups/) — the one
+#     place printer_forward.py's `lp` shell-out is exercised against real
+#     CUPS rather than the fake `lp` every other suite here uses. Currently
+#     KNOWN BROKEN (continue-on-error: true) — cross-container lpstat/lp
+#     fails with a CUPS error not explained by anything in this repo's own
+#     config; see docs/testing.md for the full diagnostic trail and what's
+#     already ruled out.
+#   - wokwi-sync-smoke-test: boots the real on-device sync stack (WifiManager
+#     + SyncClient + SyncManager, firmware/test/wokwi_sync/) in the Wokwi
+#     ESP32-C3 simulator against a real pi-server instance. Best-effort:
+#     only runs when a WOKWI_CLI_TOKEN secret is configured (see
+#     docs/testing.md "Wokwi firmware simulation" for how to add one), and
+#     never blocks the rest of this workflow if it fails.
 #
 # Each suite is a separate job so a failure is attributable to the right
 # component in the GitHub UI. CI installs dependencies directly into the
@@ -31,6 +47,7 @@
 name: Tests
 
 on:
+  workflow_dispatch: {}
   push:
     branches:
       - main
@@ -116,7 +133,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   xtc-wasm-regenerate-check:
-    name: XTC WASM decoder regenerate check
+    name: XTC WASM decoder/encoder regenerate check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,11 +148,19 @@ jobs:
       - name: Rebuild WASM decoder
         run: bash tools/xtc-wasm/build.sh
 
-      - name: Regenerate embedded header
+      - name: Regenerate decoder embedded header
         run: python3 firmware/src/ui/wasm/generate_header.py
 
+      - name: Rebuild WASM encoder
+        run: bash tools/xtc-wasm/build_encoder.sh
+
+      - name: Regenerate encoder embedded header
+        run: python3 firmware/src/ui/wasm/generate_encoder_header.py
+
       - name: Fail if committed output has drifted
-        run: git diff --exit-code -- firmware/src/ui/wasm firmware/src/ui/XtcDecoderWasmData.h
+        run: |
+          git diff --exit-code -- firmware/src/ui/wasm \
+            firmware/src/ui/XtcDecoderWasmData.h firmware/src/ui/XtcEncoderWasmData.h
 
   pages-regenerate-check:
     name: X4 web UI pages regenerate check
@@ -152,3 +177,163 @@ jobs:
 
       - name: Fail if committed output has drifted
         run: git diff --exit-code -- firmware/src/ui/PagesData.h
+
+  docker-cups-tests:
+    name: Docker real-CUPS integration tests
+    runs-on: ubuntu-latest
+    # KNOWN BROKEN as of this writing (cross-container lpstat/lp against
+    # cupsd fails with a CUPS error unrelated to any of this repo's own
+    # config -- see docker-compose.test.yml's pi-server.environment comment
+    # and docs/testing.md's "Docker: real-CUPS integration" section for the
+    # full diagnostic trail). Non-blocking until a human with real `docker
+    # compose` access resolves it -- CI's log-only feedback loop is
+    # exhausted on this one. Remove this once it's fixed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-latest ships Docker + the compose plugin already.
+      - name: Build images
+        run: docker compose -f docker-compose.test.yml build cups pi-server relay
+
+      - name: Start the real CUPS daemon
+        run: docker compose -f docker-compose.test.yml up -d cups
+
+      - name: Wait for the CUPS "PDF" queue to become healthy
+        run: |
+          cid="$(docker compose -f docker-compose.test.yml ps -q cups)"
+          for i in $(seq 1 60); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)"
+            if [ "$status" = "healthy" ]; then
+              echo "cups container is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "cups container never became healthy (status: $status)"
+          docker compose -f docker-compose.test.yml logs cups
+          exit 1
+
+      - name: Run tests/docker against the real CUPS daemon
+        run: docker compose -f docker-compose.test.yml run --rm pi-server python -m pytest tests_docker -q
+
+      - name: Diagnose from the pi-server container's own vantage point (always run)
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml run --rm --entrypoint sh pi-server -c '
+            echo "CUPS_SERVER=$CUPS_SERVER";
+            echo "--- getent hosts cups ---"; getent hosts cups || true;
+            echo "--- lpstat -h \$CUPS_SERVER -t (bare CUPS_SERVER, as lp itself would use it) ---";
+            lpstat -h "$CUPS_SERVER" -t || true;
+            echo "--- lpstat -h cups:631 -t (explicit host:port) ---";
+            lpstat -h cups:631 -t || true;
+            echo "--- lpstat -h cups:631 -p PDF -l (long status) ---";
+            lpstat -h cups:631 -p PDF -l || true;
+          '
+
+      - name: Show cups container logs (diagnostics, always run)
+        if: always()
+        run: docker compose -f docker-compose.test.yml logs cups
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
+  wokwi-sync-smoke-test:
+    name: Wokwi on-device sync smoke test (best-effort)
+    runs-on: ubuntu-latest
+    # Needs a WOKWI_CLI_TOKEN repo secret (a free Wokwi account, see
+    # docs/testing.md "Wokwi firmware simulation") to run at all, and
+    # exercises real firmware code against a real simulator this workflow
+    # doesn't otherwise validate ahead of time -- never block the rest of
+    # CI on it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Skip if WOKWI_CLI_TOKEN is not configured
+        id: gate
+        env:
+          HAS_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN != '' }}
+        run: echo "run=$HAS_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        if: steps.gate.outputs.run == 'true'
+        run: pip install platformio
+
+      - name: Build the wokwi_sync_test firmware
+        if: steps.gate.outputs.run == 'true'
+        working-directory: firmware
+        run: pio run -e wokwi_sync_test
+
+      - name: Install mtools (build a FAT SD image without root/loop devices)
+        if: steps.gate.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y mtools dosfstools
+
+      - name: Start a real pi-server instance for the simulated device to sync against
+        if: steps.gate.outputs.run == 'true'
+        working-directory: pi-server
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .claude/skills/run-pi-server/driver.sh start
+
+      - name: Submit a real print job, so the simulated device has something to sync
+        if: steps.gate.outputs.run == 'true'
+        working-directory: pi-server
+        run: .venv/bin/python .claude/skills/run-pi-server/submit_print_job.py http://127.0.0.1:16310/ipp/print "Wokwi Sync Test Job"
+
+      - name: "Pair a device (writes device_id/token + pi_base_url via pair_device.py)"
+        if: steps.gate.outputs.run == 'true'
+        working-directory: pi-server
+        env:
+          FOCUSINK_DATA_DIR: /tmp/run-pi-server-scratch/pi-data
+          FOCUSINK_SYNC_PORT: "18443"
+          # UNVERIFIED (see docs/testing.md "Wokwi firmware simulation" —
+          # this whole job is best-effort): from inside Wokwi's simulated
+          # network, "127.0.0.1" is the simulated ESP32's OWN loopback, not
+          # this runner's. Whether wokwi-cli's local network mode makes the
+          # runner reachable at 127.0.0.1 anyway, or needs a gateway
+          # address instead (e.g. QEMU/SLIRP-style networks commonly use
+          # 10.0.2.2 for "the host"), is exactly the thing to check first
+          # if this job's sync ever fails at the WiFi-connects-but-HTTP-
+          # fails stage. Override via a WOKWI_DEVICE_HOST repository
+          # variable once you know the right value for real.
+          WOKWI_DEVICE_HOST: ${{ vars.WOKWI_DEVICE_HOST || '127.0.0.1' }}
+        run: .venv/bin/python tools/pair_device.py --name "Wokwi Test X4" --pi-host "$WOKWI_DEVICE_HOST" --out /tmp/wokwi-device.json
+
+      - name: Build the Wokwi SD card image (/system/device.json, pi_ca.pem, wifi.json)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          IMG=firmware/test/wokwi_sync/sd.img
+          dd if=/dev/zero of="$IMG" bs=1M count=64
+          mkfs.vfat "$IMG"
+          mmd -i "$IMG" ::/system
+          mmd -i "$IMG" ::/inbox
+          mcopy -i "$IMG" firmware/test/wokwi_sync/fixtures/wifi.json ::/system/wifi.json
+          mcopy -i "$IMG" /tmp/wokwi-device.json ::/system/device.json
+          mcopy -i "$IMG" /tmp/run-pi-server-scratch/pi-data/tls/server.crt ::/system/pi_ca.pem
+
+      - name: Run the firmware in Wokwi
+        if: steps.gate.outputs.run == 'true'
+        uses: wokwi/wokwi-ci-action@v1
+        with:
+          token: ${{ secrets.WOKWI_CLI_TOKEN }}
+          path: firmware/test/wokwi_sync
+          timeout: 90000
+          expect_text: "WOKWI_SYNC_TEST: PASS"
+          fail_text: "WOKWI_SYNC_TEST: FAIL"
+
+      - name: Stop pi-server
+        if: always() && steps.gate.outputs.run == 'true'
+        working-directory: pi-server
+        run: .claude/skills/run-pi-server/driver.sh stop

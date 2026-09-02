@@ -3,7 +3,7 @@ import struct
 import pytest
 
 from tests.conftest import make_test_pdf, make_test_png
-from xteink_print_server.convert import ConversionError, RenderMode, convert_document_to_xtc
+from focusink_server.convert import ConversionError, RenderMode, convert_document_to_xtc
 
 
 def test_convert_pdf_produces_expected_page_count():

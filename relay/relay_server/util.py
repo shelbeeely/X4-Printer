@@ -1,4 +1,4 @@
-"""Small shared helpers (deliberately duplicated from pi-server/xteink_print_server/util.py
+"""Small shared helpers (deliberately duplicated from pi-server/focusink_server/util.py
 rather than shared as a common package — the relay and the Pi server are
 separate deployables, often on separate machines/hosts, and this project
 keeps that boundary real rather than introducing a shared-lib dependency

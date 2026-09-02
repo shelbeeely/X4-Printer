@@ -1,0 +1,8 @@
+# Points wokwi-cli at the wokwi_sync_test build (see platformio.ini) and
+# this directory's diagram.json. See docs/testing.md "Wokwi firmware
+# simulation" and .github/workflows/tests.yml's wokwi-sync-smoke-test job
+# for how this gets built and invoked.
+[wokwi]
+version = 1
+firmware = '../../.pio/build/wokwi_sync_test/firmware.bin'
+elf = '../../.pio/build/wokwi_sync_test/firmware.elf'

@@ -25,6 +25,10 @@ struct SyncSummary {
   int approvalsSynced = 0;
   int approvalsFailedSync = 0;
   bool usedRelay = false;
+  // Locally-uploaded jobs (see ui/WebUiServer.cpp's /api/upload/original)
+  // whose original image bytes were handed to the Pi this sync -- see
+  // uploadPendingOriginals().
+  int originalsUploaded = 0;
 };
 
 class SyncManager {
@@ -45,7 +49,19 @@ class SyncManager {
   store::ApprovalOutboxIndex& outbox_;
 
   void downloadPendingJobs(net::SyncClient& client, SyncSummary& summary);
+  // Hands the Pi the original image bytes for any job the on-device web UI
+  // created directly (JobEntry::originalPending) -- must run before
+  // drainApprovalOutbox() so a queued Print approval for one of these jobs
+  // never reaches the Pi before the Pi actually has something to print
+  // (see docs/architecture.md's direct-upload section). Requires the Pi to
+  // be directly reachable (net::Endpoint::Pi) -- never attempted over the
+  // relay, which never sees document bytes.
+  void uploadPendingOriginals(net::SyncClient& client, SyncSummary& summary);
   void drainApprovalOutbox(net::SyncClient& client, SyncSummary& summary);
+  // docs/protocol.md §1.6: pulls the Pi-managed calendar/Wi-Fi lists and
+  // applies them to config::CalendarConfig/WifiStore. A no-op (leaves
+  // existing on-device config untouched) if the Pi isn't reachable.
+  void syncDeviceConfig(net::SyncClient& client);
 };
 
 }  // namespace syncmgr

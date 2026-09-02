@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focusink — Admin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Focusink <span class="muted">admin</span></span>
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="jobs">Jobs</button>
+    <button class="tab-btn" data-tab="devices">Devices</button>
+    <button class="tab-btn" data-tab="approvals">Approvals</button>
+    <button class="tab-btn" data-tab="device-config">Calendars &amp; Wi-Fi</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+  </nav>
+</header>
+
+<main class="wrap">
+  <div id="error-banner" class="banner banner-error" hidden></div>
+
+  <section id="tab-dashboard" class="tab-panel">
+    <h1>Dashboard</h1>
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card"><span class="stat-value" id="stat-pending">—</span><span class="stat-label">jobs pending</span></div>
+      <div class="stat-card"><span class="stat-value" id="stat-devices">—</span><span class="stat-label">paired devices</span></div>
+      <div class="stat-card"><span class="stat-value" id="stat-unapplied">—</span><span class="stat-label">unapplied approvals</span></div>
+      <div class="stat-card"><span class="stat-value" id="stat-printer">—</span><span class="stat-label">CUPS queue</span></div>
+      <div class="stat-card"><span class="stat-value" id="stat-relay">—</span><span class="stat-label">relay</span></div>
+    </div>
+  </section>
+
+  <section id="tab-jobs" class="tab-panel" hidden>
+    <h1>Jobs</h1>
+    <p class="hint">Reprint / keep / archive apply through the same idempotent path the X4 uses. Requeue clears delivery records so devices redownload it. Purge deletes the job's files and row permanently.</p>
+    <table class="data-table" id="jobs-table">
+      <thead><tr>
+        <th></th><th>Title</th><th>Status</th><th>Pages</th><th>Size</th><th>Delivered</th><th>Last action</th><th>Created</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="tab-devices" class="tab-panel" hidden>
+    <h1>Devices</h1>
+    <p class="hint">Revoke immediately invalidates that device's bearer token. Rotate token issues a new one — copy it into the device's SD card as <code>/system/device.json</code>; the old token stops working right away.</p>
+    <table class="data-table" id="devices-table">
+      <thead><tr>
+        <th>Name</th><th>Device ID</th><th>Paired</th><th>Last seen</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="tab-approvals" class="tab-panel" hidden>
+    <h1>Recent approvals</h1>
+    <p class="hint">Read-only — most recent 50, newest first.</p>
+    <table class="data-table" id="approvals-table">
+      <thead><tr>
+        <th>Job</th><th>Action</th><th>Via</th><th>Applied</th><th>Detail</th><th>Received</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="tab-device-config" class="tab-panel" hidden>
+    <h1>Calendars &amp; Wi-Fi</h1>
+    <p class="hint">Pushed to every paired X4 on its next sync (no radio window of its own — rides the same connect/sync/sleep the device already does for print jobs). Calendars replace the device's list wholesale; Wi-Fi networks are merged in without ever removing a network the device already has saved, so a Pi-side list that's missing the device's current network can't strand it.</p>
+
+    <h2>Calendars</h2>
+    <table class="data-table" id="calendars-table">
+      <thead><tr><th>Label</th><th>URL</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <form id="calendar-form" class="inline-form">
+      <input type="text" name="label" id="cal-label" placeholder="Label (optional)">
+      <input type="url" name="url" id="cal-url" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics" required>
+      <button type="submit" class="btn btn-primary">Add calendar</button>
+    </form>
+    <p class="hint" id="calendars-limit-hint"></p>
+
+    <h2>Wi-Fi networks</h2>
+    <table class="data-table" id="wifi-table">
+      <thead><tr><th>SSID</th><th>Password</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <form id="wifi-form" class="inline-form">
+      <input type="text" name="ssid" id="wifi-ssid" placeholder="SSID" required>
+      <input type="text" name="password" id="wifi-password" placeholder="Password">
+      <button type="submit" class="btn btn-primary">Add / update network</button>
+    </form>
+    <p class="hint" id="wifi-limit-hint"></p>
+  </section>
+
+  <section id="tab-settings" class="tab-panel" hidden>
+    <h1>Settings</h1>
+    <p class="hint">Changes apply immediately, no restart — persisted to <code>admin_settings.json</code> in the data directory. Host/port/TLS settings aren't editable here; those stay in the systemd unit.</p>
+    <form id="settings-form" class="settings-form">
+      <label>CUPS queue name
+        <input type="text" name="cups_queue" id="set-cups_queue">
+      </label>
+      <label>Retention (days)
+        <input type="number" name="retention_days" id="set-retention_days" min="1">
+      </label>
+      <fieldset>
+        <legend>Cloud relay (remote approval)</legend>
+        <label>Relay URL
+          <input type="text" name="relay_url" id="set-relay_url" placeholder="https://relay.example.com">
+        </label>
+        <label>Relay account ID
+          <input type="text" name="relay_account_id" id="set-relay_account_id">
+        </label>
+        <label>Relay account token
+          <input type="text" name="relay_account_token" id="set-relay_account_token">
+        </label>
+        <label>Poll interval (seconds)
+          <input type="number" name="relay_poll_interval_seconds" id="set-relay_poll_interval_seconds" min="1">
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="relay_allow_document_sync" id="set-relay_allow_document_sync">
+          Allow document sync over the relay
+        </label>
+      </fieldset>
+      <button type="submit" class="btn btn-primary">Save settings</button>
+      <span id="settings-saved" class="hint" hidden>Saved.</span>
+    </form>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

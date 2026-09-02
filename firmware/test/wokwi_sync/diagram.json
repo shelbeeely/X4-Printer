@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "author": "X4 Print Inbox test harness",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-esp32-c3-devkitm-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-microsd-card", "id": "sd", "top": -60, "left": 80, "attrs": { "image": "sd.img" } }
+  ],
+  "connections": [
+    ["esp:8", "sd:SCK", "green", []],
+    ["esp:10", "sd:MOSI", "blue", []],
+    ["esp:7", "sd:MISO", "yellow", []],
+    ["esp:12", "sd:CS", "purple", []],
+    ["esp:3V3", "sd:VCC", "red", []],
+    ["esp:GND.1", "sd:GND", "black", []]
+  ]
+}

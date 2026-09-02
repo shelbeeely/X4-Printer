@@ -8,8 +8,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
+from focusink_server.config import Config
+from focusink_server.db import Database
 
 
 class FakeLpBinary(str):
@@ -29,7 +29,7 @@ def fake_lp_binary(tmp_path: Path) -> FakeLpBinary:
     script.write_text(
         "#!/bin/sh\n"
         f"echo \"$@\" >> {log}\n"
-        "echo 'request id is xteink-print-inbox-7 (1 file(s))'\n"
+        "echo 'request id is focusink-7 (1 file(s))'\n"
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     wrapped = FakeLpBinary(str(script))

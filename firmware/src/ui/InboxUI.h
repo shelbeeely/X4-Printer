@@ -23,6 +23,8 @@
 
 #include <FreeInkApp.h>
 
+#include "config/AppSettings.h"
+#include "config/CalendarCache.h"
 #include "config/DeviceConfig.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
@@ -45,12 +47,54 @@ enum class ScreenMode {
   Status,    // last sync result / pairing status
   WebUiChoice,  // "Use Wi-Fi" / "Use Hotspot" / "Cancel" — entry point for the on-device web UI
   WebUi,        // web UI is running: shows connection info + PIN + Stop
+  Settings,     // tabbed settings — see SettingsTab
+  // Rendered exactly once on a Timer wake that lands within a configured
+  // calendar-reminder window (Settings > Calendar tab; see
+  // calendar/WakeSchedule.h), then main.cpp sleeps immediately — nobody is
+  // expected to be holding the device when a background timer wake fires,
+  // so there's no interactive follow-up screen for this the way the other
+  // modes have.
+  CalendarReminder,
+};
+
+// Which threshold fired the reminder currently showing (ScreenMode::
+// CalendarReminder) -- set by main.cpp right before it builds/renders the
+// UI for that one frame.
+enum class CalendarReminderKind : uint8_t {
+  BeforeStart,
+  AtEnd,
+};
+
+// One tab per settings group, matching the "tabbed groups" convention the
+// FreeInk SDK's other apps use for on-device settings (WakeInk's
+// Alarm/Sound/Filter/Clock/System tabs, sticky-reminders' Wi-Fi & clock
+// group) — switched with the Prev/Next footer actions, not a touch tab bar
+// the X4 has no hardware for.
+enum class SettingsTab : uint8_t {
+  Wifi = 0,       // saved networks: view + remove (adding a network needs
+                   // text entry this device has no keyboard for — done from
+                   // the on-device Web UI instead, see WebUiServer.h)
+  SyncRelay = 1,  // pairing/relay info -- read-only, provisioned by
+                  // pi-server/tools/pair_device.py, not editable on-device
+  Display = 2,    // default reading view (portrait/landscape)
+  Calendar = 3,   // wake-before-event / wake-at-event-end reminders -- see
+                  // calendar/WakeSchedule.h
+  DeviceInfo = 4,  // firmware version, battery, storage, uptime -- read-only
+  kCount = 5,
 };
 
 struct InboxUiState {
   store::JobIndex* jobs = nullptr;
   store::ApprovalOutboxIndex* outbox = nullptr;
   const config::DeviceConfigData* deviceConfig = nullptr;
+  // Not const: the Settings screen's Display tab writes through this
+  // (config::AppSettings::instance().data(), wired by main.cpp) and saves
+  // via config::AppSettings::instance().save() on change.
+  config::AppSettingsData* appSettings = nullptr;
+  // Refreshed by main.cpp's runSyncPass() after every sync pass (see that
+  // function's comment) -- the Inbox screen's idle state reads this when
+  // there are no print jobs to review. Read-only from the UI's side.
+  const config::NextEventInfo* nextEvent = nullptr;
 
   // On-device web UI (ui/WebUiServer.h) — see docs/architecture.md
   // "On-device Web UI". A plain member (not a pointer): its own
@@ -76,6 +120,18 @@ struct InboxUiState {
 
   syncmgr::SyncSummary lastSyncSummary;
   bool hasSyncedOnce = false;
+
+  // Settings screen (ScreenMode::Settings) navigation state -- which tab is
+  // showing and which Wi-Fi network row (if any) is pending a remove
+  // confirmation. Persists across renders the same way selectedJobIndex
+  // does, so re-entering Settings picks up where the user left it within
+  // one wake window (not saved anywhere; resets to Wifi/-1 next boot).
+  SettingsTab settingsTab = SettingsTab::Wifi;
+  int16_t settingsWifiRemoveIndex = -1;
+
+  // Set by main.cpp right before it renders the one-shot
+  // ScreenMode::CalendarReminder frame -- see that enum's comment.
+  CalendarReminderKind calendarReminderKind = CalendarReminderKind::BeforeStart;
 
   // Set by main.cpp before each app.render() call so screen functions can
   // reach the raw framebuffer for the reader's direct page write.

@@ -15,6 +15,8 @@ firmware/test/build/
 
 # Local data / secrets — never commit a real deployment's state
 pi-server/data/
+/data/
+.env
 *.db
 *.db-wal
 *.db-shm

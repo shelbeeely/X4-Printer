@@ -7,11 +7,11 @@ import urllib.request
 
 import pytest
 
-from xteink_print_server.admin_api import AdminApiServer
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.relay_client import RelayClient
-from xteink_print_server.util import hash_token, sha256_file
+from focusink_server.admin_api import AdminApiServer
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.relay_client import RelayClient
+from focusink_server.util import hash_token, sha256_file
 
 DEVICE_ID = "dev-test1"
 DEVICE_TOKEN = "supersecrettoken"
@@ -37,7 +37,7 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False,
         xtc_landscape_path = str(landscape_path)
         xtc_landscape_bytes = landscape_path.stat().st_size
         xtc_landscape_sha256 = sha256_file(landscape_path)
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original_path),
@@ -53,6 +53,7 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False,
         xtc_landscape_sha256=xtc_landscape_sha256,
         xtc_landscape_page_count=2 if with_landscape else 0,
     )
+    return job_id
 
 
 @pytest.fixture
@@ -457,5 +458,83 @@ def test_static_index_served(running_admin_api):
     root = base.rsplit("/api/", 1)[0]
     resp = _get(f"{root}/")
     body = resp.read().decode()
-    assert "X4 Print Inbox" in body
+    assert "Focusink" in body
     assert resp.headers["Content-Type"].startswith("text/html")
+
+
+# -- calendars & Wi-Fi (synced to every device, docs/protocol.md §1.6) -------
+
+
+def test_add_and_list_calendars(running_admin_api):
+    base, _db, _config = running_admin_api
+    resp = json.loads(_post(f"{base}/calendars", {"url": "https://example.com/a.ics", "label": "Work"}).read())
+    assert "id" in resp
+
+    listed = json.loads(_get(f"{base}/calendars").read())
+    assert len(listed["calendars"]) == 1
+    assert listed["calendars"][0]["url"] == "https://example.com/a.ics"
+    assert listed["calendars"][0]["label"] == "Work"
+    assert listed["max"] == 4
+
+
+def test_add_calendar_requires_url(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/calendars", {"label": "No URL"})
+    assert exc.value.code == 400
+
+
+def test_add_calendar_enforces_max(running_admin_api):
+    base, _db, _config = running_admin_api
+    for i in range(4):
+        _post(f"{base}/calendars", {"url": f"https://example.com/{i}.ics", "label": ""})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/calendars", {"url": "https://example.com/one-too-many.ics", "label": ""})
+    assert exc.value.code == 400
+
+
+def test_delete_calendar(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(_post(f"{base}/calendars", {"url": "https://example.com/a.ics", "label": ""}).read())
+    _post(f"{base}/calendars/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/calendars").read())
+    assert listed["calendars"] == []
+
+
+def test_add_and_list_wifi_networks(running_admin_api):
+    base, _db, _config = running_admin_api
+    resp = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "hunter2"}).read())
+    assert "id" in resp
+
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert len(listed["wifi_networks"]) == 1
+    assert listed["wifi_networks"][0]["ssid"] == "HomeWiFi"
+    assert listed["wifi_networks"][0]["password"] == "hunter2"
+    assert listed["max"] == 8
+
+
+def test_add_wifi_network_upserts_existing_ssid(running_admin_api):
+    base, _db, _config = running_admin_api
+    first = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "old"}).read())
+    second = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "new"}).read())
+    assert first["id"] == second["id"]
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert len(listed["wifi_networks"]) == 1
+    assert listed["wifi_networks"][0]["password"] == "new"
+
+
+def test_add_wifi_network_enforces_max(running_admin_api):
+    base, _db, _config = running_admin_api
+    for i in range(8):
+        _post(f"{base}/wifi-networks", {"ssid": f"Net{i}", "password": "pw"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/wifi-networks", {"ssid": "OneTooMany", "password": "pw"})
+    assert exc.value.code == 400
+
+
+def test_delete_wifi_network(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "hunter2"}).read())
+    _post(f"{base}/wifi-networks/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert listed["wifi_networks"] == []

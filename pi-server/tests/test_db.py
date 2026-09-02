@@ -1,6 +1,6 @@
 import sqlite3
 
-from xteink_print_server.db import Database, SCHEMA, _ensure_column
+from focusink_server.db import Database, SCHEMA, _ensure_column
 
 
 def _insert_job(
@@ -12,7 +12,7 @@ def _insert_job(
     xtc_landscape_sha256: str = "",
     xtc_landscape_page_count: int = 0,
 ) -> str:
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path="/tmp/orig.pdf",
@@ -28,6 +28,7 @@ def _insert_job(
         xtc_landscape_sha256=xtc_landscape_sha256,
         xtc_landscape_page_count=xtc_landscape_page_count,
     )
+    return job_id
 
 
 def test_insert_and_get_job(db: Database):
@@ -36,6 +37,54 @@ def test_insert_and_get_job(db: Database):
     assert row["title"] == "Doc"
     assert row["status"] == "pending"
     assert row["page_count"] == 2
+
+
+def test_insert_job_with_explicit_id_is_idempotent(db: Database):
+    """The X4 direct-upload path (docs/protocol.md §1.7) supplies its own
+    job_id so a retried upload becomes a cheap no-op rather than a
+    duplicate row -- INSERT OR IGNORE keyed on job_id, same idempotency
+    shape as record_approval_if_new's approval_id."""
+    kwargs = dict(
+        title="Photo",
+        source="x4_upload",
+        original_path="/tmp/orig.jpg",
+        original_mime="image/jpeg",
+        original_bytes=999,
+        xtc_path="/tmp/out.xtc",
+        xtc_bytes=100,
+        xtc_sha256="cafebabe",
+        page_count=1,
+        job_id="x4jobfeedfacefeedfacefeedfacefee",
+    )
+    job_id_1, is_new_1 = db.insert_job(**kwargs)
+    job_id_2, is_new_2 = db.insert_job(**kwargs)
+
+    assert job_id_1 == job_id_2 == "x4jobfeedfacefeedfacefeedfacefee"
+    assert is_new_1 is True
+    assert is_new_2 is False
+    assert len(db.list_all_jobs()) == 1
+
+
+def test_insert_job_without_job_id_never_collides(db: Database):
+    job_id_1, is_new_1 = _insert_job_with_flag(db)
+    job_id_2, is_new_2 = _insert_job_with_flag(db)
+    assert job_id_1 != job_id_2
+    assert is_new_1 is True
+    assert is_new_2 is True
+
+
+def _insert_job_with_flag(db: Database) -> tuple[str, bool]:
+    return db.insert_job(
+        title="Doc",
+        source="ipp",
+        original_path="/tmp/orig.pdf",
+        original_mime="application/pdf",
+        original_bytes=1234,
+        xtc_path="/tmp/out.xtc",
+        xtc_bytes=4321,
+        xtc_sha256="deadbeef",
+        page_count=2,
+    )
 
 
 def test_pending_jobs_hide_delivered(db: Database):
@@ -213,3 +262,33 @@ def test_list_recent_approvals_for_device_scopes_by_device(db: Database):
     assert dev2_approvals[0]["approval_id"] == "a2"
 
     assert db.list_recent_approvals_for_device("dev-nonexistent") == []
+
+
+def test_calendar_feeds_ordered_by_position(db: Database):
+    first_id = db.add_calendar_feed("https://example.com/a.ics", "A")
+    second_id = db.add_calendar_feed("https://example.com/b.ics", "B")
+    feeds = db.list_calendar_feeds()
+    assert [f["id"] for f in feeds] == [first_id, second_id]
+    assert feeds[0]["url"] == "https://example.com/a.ics"
+    assert feeds[0]["label"] == "A"
+
+
+def test_delete_calendar_feed(db: Database):
+    feed_id = db.add_calendar_feed("https://example.com/a.ics", "A")
+    db.delete_calendar_feed(feed_id)
+    assert db.list_calendar_feeds() == []
+
+
+def test_add_or_update_wifi_network_upserts_by_ssid(db: Database):
+    first_id = db.add_or_update_wifi_network("HomeWiFi", "pw1")
+    second_id = db.add_or_update_wifi_network("HomeWiFi", "pw2")
+    assert first_id == second_id
+    networks = db.list_wifi_networks()
+    assert len(networks) == 1
+    assert networks[0]["password"] == "pw2"
+
+
+def test_delete_wifi_network(db: Database):
+    network_id = db.add_or_update_wifi_network("HomeWiFi", "pw1")
+    db.delete_wifi_network(network_id)
+    assert db.list_wifi_networks() == []

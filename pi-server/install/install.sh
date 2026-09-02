@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Installs the Xteink X4 print server on a Raspberry Pi (tested target:
+# Installs the Focusink print server on a Raspberry Pi (tested target:
 # Raspberry Pi OS Bookworm on a Pi Zero W, but works on any Debian-family
 # host). Idempotent: safe to re-run after a `git pull` to pick up code
 # changes.
 #
 # What this does:
 #   1. Installs system packages: cups, avahi-daemon, python3-venv, openssl.
-#   2. Creates a dedicated `xteink-print` system user (member of `lp`, so it
+#   2. Creates a dedicated `focusink` system user (member of `lp`, so it
 #      can submit jobs to CUPS without being root).
-#   3. Copies this checkout to /opt/xteink-print-server and creates a venv
+#   3. Copies this checkout to /opt/focusink-server and creates a venv
 #      there with requirements.txt installed.
 #   4. Generates a self-signed TLS cert for the X4 sync API if one doesn't
 #      already exist (re-run tools/gen_selfsigned_cert.py by hand if your
 #      Pi's LAN IP changes).
-#   5. Renders and installs the avahi mDNS service file so "Xteink X4" shows
+#   5. Renders and installs the avahi mDNS service file so "Focusink" shows
 #      up in print dialogs.
 #   6. Installs and enables the systemd unit.
 #
@@ -31,11 +31,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
-INSTALL_DIR="/opt/xteink-print-server"
-DATA_DIR="/var/lib/xteink-print-server"
-SERVICE_USER="xteink-print"
-PRINTER_NAME="${XTEINK_PRINTER_NAME:-Xteink X4}"
-IPP_PORT="${XTEINK_IPP_PORT:-6310}"
+INSTALL_DIR="/opt/focusink-server"
+DATA_DIR="/var/lib/focusink-server"
+SERVICE_USER="focusink"
+PRINTER_NAME="${FOCUSINK_PRINTER_NAME:-Focusink}"
+IPP_PORT="${FOCUSINK_IPP_PORT:-6310}"
 
 echo "==> Installing system packages"
 apt-get update -qq
@@ -82,19 +82,19 @@ sed \
   -e "s/@@PRINTER_NAME@@/${PRINTER_NAME}/g" \
   -e "s/@@IPP_PORT@@/${IPP_PORT}/g" \
   -e "s/@@PRINTER_UUID@@/${PRINTER_UUID}/g" \
-  "$SOURCE_DIR/install/avahi/xteink-x4-ipp.service.template" \
-  > /etc/avahi/services/xteink-x4-ipp.service
+  "$SOURCE_DIR/install/avahi/focusink-x4-ipp.service.template" \
+  > /etc/avahi/services/focusink-x4-ipp.service
 systemctl restart avahi-daemon
 
 echo "==> Installing systemd unit"
-install -m 0644 "$SOURCE_DIR/install/xteink-print-server.service" /etc/systemd/system/xteink-print-server.service
+install -m 0644 "$SOURCE_DIR/install/focusink-server.service" /etc/systemd/system/focusink-server.service
 systemctl daemon-reload
-systemctl enable xteink-print-server.service
-systemctl restart xteink-print-server.service
+systemctl enable focusink-server.service
+systemctl restart focusink-server.service
 
 echo
 echo "============================================================"
-echo " Xteink X4 print server installed."
+echo " Focusink print server installed."
 echo "============================================================"
 echo
 echo "1. Configure your physical printer in CUPS (one-time), e.g.:"
@@ -103,9 +103,9 @@ echo "     lpadmin -p MyPrinter -E -v <device-uri-from-above> -m everywhere"
 echo "   or use the CUPS web UI: http://$(hostname -I 2>/dev/null | awk '{print $1}'):631/admin"
 echo
 echo "2. Point the print server at that queue:"
-echo "     sudo systemctl edit xteink-print-server.service"
-echo "     # add: [Service]\\nEnvironment=XTEINK_CUPS_QUEUE=MyPrinter"
-echo "     sudo systemctl restart xteink-print-server.service"
+echo "     sudo systemctl edit focusink-server.service"
+echo "     # add: [Service]\\nEnvironment=FOCUSINK_CUPS_QUEUE=MyPrinter"
+echo "     sudo systemctl restart focusink-server.service"
 echo
 echo "3. Pair each X4:"
 echo "     sudo -u $SERVICE_USER $INSTALL_DIR/.venv/bin/python $INSTALL_DIR/tools/pair_device.py \\"
@@ -114,16 +114,16 @@ echo "   then copy device.json -> X4 SD card /system/device.json, and"
 echo "   $DATA_DIR/tls/server.crt -> X4 SD card /system/pi_ca.pem (see docs/setup-x4.md)."
 echo
 echo "4. (Optional) Enable remote approval: see docs/relay.md, then set"
-echo "   XTEINK_RELAY_URL/XTEINK_RELAY_ACCOUNT_ID/XTEINK_RELAY_ACCOUNT_TOKEN"
+echo "   FOCUSINK_RELAY_URL/FOCUSINK_RELAY_ACCOUNT_ID/FOCUSINK_RELAY_ACCOUNT_TOKEN"
 echo "   the same way as step 2."
 echo
 echo "5. (Optional) Enable the admin web console (dashboard, job/device"
 echo "   management, live settings) by setting a password:"
-echo "     sudo systemctl edit xteink-print-server.service"
-echo "     # add: [Service]\\nEnvironment=XTEINK_ADMIN_PASSWORD=<a strong password>"
-echo "     sudo systemctl restart xteink-print-server.service"
+echo "     sudo systemctl edit focusink-server.service"
+echo "     # add: [Service]\\nEnvironment=FOCUSINK_ADMIN_PASSWORD=<a strong password>"
+echo "     sudo systemctl restart focusink-server.service"
 echo "   then open http://$(hostname -I 2>/dev/null | awk '{print $1}'):8090/"
 echo "   (or https:// once tls/server.crt exists, generated in step above)."
-echo "   Leave XTEINK_ADMIN_PASSWORD unset to keep it disabled."
+echo "   Leave FOCUSINK_ADMIN_PASSWORD unset to keep it disabled."
 echo
 echo "\"$PRINTER_NAME\" should now appear in print dialogs on your LAN."

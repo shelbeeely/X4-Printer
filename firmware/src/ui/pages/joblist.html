@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>X4 Print Inbox</title>
+<title>Focusink</title>
 <script>(function(){try{var t=localStorage.getItem('x4-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
 <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
@@ -26,7 +26,10 @@ header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24
 .header-row{display:flex;align-items:center;gap:.6rem}
 .header-row h1{flex:1;margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
 button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#theme-toggle{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer}
+#theme-toggle,#upload-btn{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer}
+#upload-btn:disabled{opacity:.5;cursor:default}
+#upload-status{color:var(--muted);font-size:.85rem;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:.5rem .75rem;margin:.5rem 0}
+#upload-status.error{color:var(--danger);background:var(--danger-bg);border-color:var(--danger)}
 .signal{display:inline-flex;align-items:center;padding:.2rem .5rem;border-radius:999px;font-size:.7rem;font-weight:700;border:1px solid var(--border)}
 .signal-strong{color:var(--sage);border-color:var(--sage)}
 .signal-ok{color:var(--gold);border-color:var(--gold)}
@@ -56,10 +59,13 @@ details#diag p{margin:.3rem 0}
   <div class="header-row">
     <h1>Print Inbox</h1>
     <span id="signal" class="signal" style="display:none"></span>
+    <button id="upload-btn" type="button">Upload</button>
+    <input id="upload-input" type="file" accept="image/jpeg,image/png" style="display:none">
     <button id="theme-toggle" type="button" aria-label="Toggle color theme">Auto</button>
   </div>
 </header>
 <p id="status" aria-live="polite" aria-atomic="true">Loading...</p>
+<p id="upload-status" aria-live="polite" aria-atomic="true" style="display:none"></p>
 <p id="sync-banner" style="display:none"></p>
 <div id="activity-link" style="display:none"><a id="activity-link-a" href="#" target="_blank" rel="noopener">Recent activity</a><ul id="activity-list"></ul></div>
 <details id="diag">
@@ -239,7 +245,14 @@ function formatMeta(j) {
   const sizeKb = (j.xtc_bytes / 1024).toFixed(0) + ' KB';
   const date = new Date(j.created_at * 1000).toLocaleString();
   const sha = (j.xtc_sha256 || '').slice(0, 8);
-  return j.status + ' · ' + sizeKb + ' · ' + date + (sha ? ' · ' + sha : '');
+  // A locally-uploaded job (see the "Upload" flow below) whose original
+  // hasn't reached the Pi yet still shows "Printing" from the server's own
+  // status label -- make that state visible rather than looking identical
+  // to a job that's actually about to come off the (fake) presses.
+  const status = (j.status === 'Printing' && j.original_pending)
+    ? 'Printing (offline — will queue when back on Wi-Fi)'
+    : j.status;
+  return status + ' · ' + sizeKb + ' · ' + date + (sha ? ' · ' + sha : '');
 }
 
 function updateCardText(div, j) {
@@ -594,6 +607,152 @@ async function openPreview(div, j) {
     if (outPtr) mod._xtc_free(outPtr);
   }
 }
+
+// ---------------- Direct upload (tools/xtc-wasm/xtc_encoder.cpp) ----------------
+// Turns a phone-picked photo/screenshot into a real job entirely
+// client-side and on-device -- no Pi needed to see or approve it. See
+// docs/architecture.md's direct-upload section: this is step 1/2 of a
+// three-step flow (encode+upload here, then the X4 forwards the original
+// to the Pi on its own next real sync) that lets "Print" work even with
+// no Pi reachable right now.
+
+let xtcEncoderModulePromise = null;
+function loadXtcEncoderModule() {
+  if (!xtcEncoderModulePromise) {
+    xtcEncoderModulePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/xtc-encoder.js';
+      script.onload = () => {
+        createXtcEncoderModule({locateFile: () => '/xtc-encoder.wasm'}).then(resolve, reject);
+      };
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  return xtcEncoderModulePromise;
+}
+
+// Cached after the first successful /api/diag fetch (same lazy-fetch
+// reasoning the diagnostics panel already uses) -- falls back to the X4's
+// known panel size if that fetch never happens to have completed yet.
+let panelDimsPromise = null;
+function getPanelDims() {
+  if (!panelDimsPromise) {
+    panelDimsPromise = fetch('/api/diag')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => (d && d.panel_width && d.panel_height) ? {w: d.panel_width, h: d.panel_height} : {w: 800, h: 480})
+      .catch(() => ({w: 800, h: 480}));
+  }
+  return panelDimsPromise;
+}
+
+function showUploadStatus(text, isError) {
+  const el = document.getElementById('upload-status');
+  el.textContent = text;
+  el.className = isError ? 'error' : '';
+  el.style.display = text ? 'block' : 'none';
+}
+
+// Letterbox-resizes `bitmap` onto a w x h canvas (contain, preserving
+// aspect ratio, centered, white background) and extracts row-major
+// grayscale pixels -- matches pi-server/focusink_server/xtc_writer.py's
+// prepare_page_image() exactly, so a locally-encoded page looks the same
+// as one the Pi would have produced from the same source image. The
+// standard ITU-R 601-2 luma weights match PIL's own convert("L").
+function letterboxGrayscale(bitmap, w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  const scale = Math.min(w / bitmap.width, h / bitmap.height);
+  const newW = Math.max(1, Math.round(bitmap.width * scale));
+  const newH = Math.max(1, Math.round(bitmap.height * scale));
+  ctx.drawImage(bitmap, Math.floor((w - newW) / 2), Math.floor((h - newH) / 2), newW, newH);
+  const pixels = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = Math.round(0.299 * pixels[i * 4] + 0.587 * pixels[i * 4 + 1] + 0.114 * pixels[i * 4 + 2]);
+  }
+  return gray;
+}
+
+async function encodeToXtc(gray, w, h, title) {
+  const mod = await loadXtcEncoderModule();
+  const titleBytes = new TextEncoder().encode(title + '\0');
+  let grayPtr = 0, titlePtr = 0, outLenPtr = 0, xtcPtr = 0;
+  try {
+    grayPtr = mod._malloc(gray.length);
+    titlePtr = mod._malloc(titleBytes.length);
+    outLenPtr = mod._malloc(4);
+    if (!grayPtr || !titlePtr || !outLenPtr) throw new Error('out of memory');
+    mod.HEAPU8.set(gray, grayPtr);
+    mod.HEAPU8.set(titleBytes, titlePtr);
+    const createTime = Math.floor(Date.now() / 1000);
+    xtcPtr = mod._xtc_encode_single_page(grayPtr, w, h, titlePtr, createTime, outLenPtr);
+    if (!xtcPtr) throw new Error('encode failed');
+    const outLen = mod.getValue(outLenPtr, 'i32');
+    return mod.HEAPU8.slice(xtcPtr, xtcPtr + outLen);
+  } finally {
+    if (grayPtr) mod._free(grayPtr);
+    if (titlePtr) mod._free(titlePtr);
+    if (outLenPtr) mod._free(outLenPtr);
+    if (xtcPtr) mod._xtc_free(xtcPtr);
+  }
+}
+
+async function uploadPickedFile(file) {
+  if (file.type !== 'image/jpeg' && file.type !== 'image/png') {
+    showUploadStatus('Only JPEG and PNG images are supported.', true);
+    return;
+  }
+
+  const uploadBtn = document.getElementById('upload-btn');
+  uploadBtn.disabled = true;
+  const title = file.name.replace(/\.[^.]+$/, '') || 'Untitled';
+  try {
+    showUploadStatus('Encoding...', false);
+    const bitmap = await createImageBitmap(file);
+    const dims = await getPanelDims();
+    const gray = letterboxGrayscale(bitmap, dims.w, dims.h);
+    const xtcBytes = await encodeToXtc(gray, dims.w, dims.h, title);
+
+    showUploadStatus('Uploading...', false);
+    const xtcForm = new FormData();
+    xtcForm.append('file', new Blob([xtcBytes], {type: 'application/octet-stream'}), 'page.xtc');
+    const xtcResp = await fetch('/api/upload/xtc?title=' + encodeURIComponent(title), {method: 'POST', body: xtcForm});
+    if (!xtcResp.ok) throw new Error('upload failed');
+    const {job_id} = await xtcResp.json();
+    refreshJobs();  // the new job is real and readable now -- show it immediately
+
+    const originalForm = new FormData();
+    originalForm.append('file', file, file.name);
+    const originalResp = await fetch(
+      '/api/upload/original?job_id=' + encodeURIComponent(job_id) + '&mime=' + encodeURIComponent(file.type),
+      {method: 'POST', body: originalForm});
+    if (!originalResp.ok) {
+      // Degrade gracefully, don't hide state: the job exists and is
+      // readable/keepable, it just can never become a real print until the
+      // user retries the whole upload (no partial-upload recovery in v1).
+      showUploadStatus('Added, but the original failed to upload -- it won’t print until you retry the upload.', true);
+      return;
+    }
+    showUploadStatus('Uploaded.', false);
+    refreshJobs();
+  } catch (e) {
+    showUploadStatus('Upload failed. Please try again.', true);
+  } finally {
+    uploadBtn.disabled = false;
+  }
+}
+
+document.getElementById('upload-btn').onclick = () => document.getElementById('upload-input').click();
+document.getElementById('upload-input').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';  // allow re-picking the same file to retry
+  if (file) uploadPickedFile(file);
+};
 
 // refreshJobs() reads piAdminBaseUrl, which only refreshStatus() sets —
 // sequenced (not fired concurrently) so the "View full document" link
