@@ -64,17 +64,52 @@ dark)`:
 
 `--accent` (mustard-orange) is the interactive/primary color; `--gold` is a
 secondary accent used for stat values and step numbers — not for primary
-buttons. `--accent2` and `--sage` (a brick-red and a muted green) are
-reserved tertiary accents: declared in every surface's token set for
-parity, but not yet consumed via `var()` anywhere. The header divider's
-second wave is visually the same brick-red as `--accent2`, but it's a
+buttons. `--sage` (a muted green) is consumed by the X4 job-list page's
+signal-strength indicator (`.signal-strong`). `--accent2` (a brick-red) is
+declared across every surface's token set for parity, and the header
+divider's second wave is visually the same brick-red, but that's a
 hardcoded hex inside an inline SVG data URI (custom properties can't be
-referenced from a data: URI), so keep that hex in sync with `--accent2` by
+referenced from a data: URI) — keep that hex in sync with `--accent2` by
 hand if either changes. `--danger`/`--danger-bg` cover error banners and
 the X4's wrong-PIN page; note the dark-mode `--danger` is a brighter
 `#ff6a47` rather than the light-mode `#bd361e` — reusing the light value in
 dark mode reads at under 3:1 contrast against the dark card/background
 tones, well short of WCAG AA.
+
+### Category tokens (Planner feature only)
+
+The X4's on-device Planner page (`ui/pages/planner.html`, docs/planner.md)
+needs one genuinely distinct color per task category — 8 categories, more
+than the 4 tokens above comfortably cover without doubling some of them
+up. Four more tokens exist for this purpose, declared only in
+`planner.html`'s own `:root` (not the other two surfaces, which have no
+category concept):
+
+```css
+:root {
+  --teal: #2f7267;
+  --plum: #7a4a6b;
+  --clay: #a8652f;
+  --slate: #55606b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --teal: #4a9a8a;
+    --plum: #b57a9e;
+    --clay: #c98a52;
+    --slate: #8b96a1;
+  }
+}
+```
+
+Category → token mapping (also mirrored in `planner.html`'s
+`CATEGORY_TOKENS` JS object — keep both in sync):
+`Work`→`--accent`, `Break`→`--sage`, `Chore`→`--accent2`, `Health`→`--gold`,
+`Social`→`--teal`, `School`→`--clay`, `Personal`→`--plum`, `Other`→`--slate`.
+The native e-paper screens use a different coding entirely for the same 8
+categories (icon + dither pattern, not color — the panel is 1bpp) — see
+`firmware/src/ui/CategoryStyle.h`; the two codings are independent and
+don't need to visually correspond.
 
 ## Typography
 
@@ -206,7 +241,7 @@ described in `tools/xtc-wasm/README.md`.
 |---|---|---|
 | GitHub Pages site | `site/assets/style.css` | Canonical source of the shared tokens (font `@import` lives here; all four site pages share this one file). |
 | Pi admin console | `pi-server/focusink_server/admin_ui/style.css` | Font `@import` at the top of the stylesheet, same as the site. |
-| X4 on-device web UI | `firmware/src/ui/pages/{login,joblist}.html` | `<style>` blocks inside each page, each with a non-blocking font `<link>` pair (`rel="preload"` + a `media="print"`/`onload` swap, so a stalled fetch in hotspot mode can't hold up first paint) in place of the `@import` the other two surfaces use. Both pages are embedded gzip-compressed into `firmware/src/ui/PagesData.h` (see that directory's `README.md`) — edit the `.html` source, not the generated header. The wrong-PIN error page in `WebUiServer.cpp`'s `handleLogin()` is a bare `<style>`/`<p>` fragment with no `<head>` of its own — it has no font `<link>` and simply renders in the fallback stack. |
+| X4 on-device web UI | `firmware/src/ui/pages/{login,joblist,planner}.html` | `<style>` blocks inside each page, each with a non-blocking font `<link>` pair (`rel="preload"` + a `media="print"`/`onload` swap, so a stalled fetch in hotspot mode can't hold up first paint) in place of the `@import` the other two surfaces use. All three pages are embedded gzip-compressed into `firmware/src/ui/PagesData.h` (see that directory's `README.md`) — edit the `.html` source, not the generated header. The wrong-PIN error page in `WebUiServer.cpp`'s `handleLogin()` is a bare `<style>`/`<p>` fragment with no `<head>` of its own — it has no font `<link>` and simply renders in the fallback stack. `planner.html` additionally declares the four category-only tokens above (see "Category tokens" section), not shared with `login`/`joblist`. |
 
 There is no shared build system tying these three together — different
 languages, different deployments, no bundler or imported stylesheet linking

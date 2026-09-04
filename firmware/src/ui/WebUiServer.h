@@ -20,6 +20,7 @@
 #include "config/DeviceConfig.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
+#include "store/PlannerStore.h"
 
 // Also serves tools/xtc-wasm/'s compiled WASM decoder (embedded via
 // ui/XtcDecoderWasmData.h) and encoder (ui/XtcEncoderWasmData.h) and a
@@ -59,8 +60,11 @@ class WebUiServer {
   // framebuffer sizing and idle timer (main.cpp's setup()), so this is
   // exposing existing values, not tracking new state on this class's
   // behalf.
+  // plannerTasks feeds GET /planner + GET /api/planner/tasks (the Planner
+  // page, docs/planner.md) -- same post-construction wiring pattern as
+  // jobs/outbox/deviceConfig above.
   void attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox, const config::DeviceConfigData* deviceConfig,
-              uint16_t panelWidth, uint16_t panelHeight, uint32_t wakeMillis);
+              uint16_t panelWidth, uint16_t panelHeight, uint32_t wakeMillis, store::TaskIndex* plannerTasks);
 
   // Joins a known Wi-Fi network (net::WifiManager::connect(), same saved
   // credentials the normal sync pass uses) and starts the server on the
@@ -102,6 +106,7 @@ class WebUiServer {
   store::JobIndex* jobs_ = nullptr;
   store::ApprovalOutboxIndex* outbox_ = nullptr;
   const config::DeviceConfigData* deviceConfig_ = nullptr;
+  store::TaskIndex* plannerTasks_ = nullptr;
   uint16_t panelWidth_ = 0;
   uint16_t panelHeight_ = 0;
   uint32_t wakeMillis_ = 0;
@@ -155,9 +160,11 @@ class WebUiServer {
   void markActivity();
 
   void handleRoot();
+  void handlePlannerPage();
   void handleLogin();
   void handleApiStatus();
   void handleApiDiag();
+  void handleApiPlannerTasksGet();
   void handleApiJobsGet();
   void handleApiJobsPost();
   void handleApiJobXtc();

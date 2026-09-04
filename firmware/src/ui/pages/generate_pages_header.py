@@ -31,6 +31,7 @@ OUT_PATH = HERE.parent / "PagesData.h"
 PAGES = [
     ("login.html", "kLoginPageHtmlGz"),
     ("joblist.html", "kJobListPageHtmlGz"),
+    ("planner.html", "kPlannerPageHtmlGz"),
 ]
 
 

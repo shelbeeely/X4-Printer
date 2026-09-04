@@ -26,7 +26,8 @@ header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24
 .header-row{display:flex;align-items:center;gap:.6rem}
 .header-row h1{flex:1;margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
 button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#theme-toggle,#upload-btn{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer}
+#theme-toggle,#upload-btn,#planner-link{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer}
+#planner-link{text-decoration:none;display:inline-block}
 #upload-btn:disabled{opacity:.5;cursor:default}
 #upload-status{color:var(--muted);font-size:.85rem;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:.5rem .75rem;margin:.5rem 0}
 #upload-status.error{color:var(--danger);background:var(--danger-bg);border-color:var(--danger)}
@@ -59,6 +60,7 @@ details#diag p{margin:.3rem 0}
   <div class="header-row">
     <h1>Print Inbox</h1>
     <span id="signal" class="signal" style="display:none"></span>
+    <a id="planner-link" href="/planner">Planner</a>
     <button id="upload-btn" type="button">Upload</button>
     <input id="upload-input" type="file" accept="image/jpeg,image/png" style="display:none">
     <button id="theme-toggle" type="button" aria-label="Toggle color theme">Auto</button>

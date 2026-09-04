@@ -12,8 +12,10 @@
 #include <cstring>
 #include <ctime>
 
+#include "config/CalendarCache.h"
 #include "net/WifiManager.h"
 #include "ui/PagesData.h"
+#include "ui/TimelineMerge.h"
 #include "ui/XtcDecoderWasmData.h"
 #include "ui/XtcEncoderWasmData.h"
 #include "util/Random.h"
@@ -75,13 +77,14 @@ const char* jobStatusLabel(store::JobStatus s) {
 
 void WebUiServer::attach(store::JobIndex* jobs, store::ApprovalOutboxIndex* outbox,
                           const config::DeviceConfigData* deviceConfig, uint16_t panelWidth, uint16_t panelHeight,
-                          uint32_t wakeMillis) {
+                          uint32_t wakeMillis, store::TaskIndex* plannerTasks) {
   jobs_ = jobs;
   outbox_ = outbox;
   deviceConfig_ = deviceConfig;
   panelWidth_ = panelWidth;
   panelHeight_ = panelHeight;
   wakeMillis_ = wakeMillis;
+  plannerTasks_ = plannerTasks;
 }
 
 void WebUiServer::generateSessionSecrets() {
@@ -145,6 +148,14 @@ void WebUiServer::beginCommon() {
     server_.on("/api/diag", HTTP_GET, [this]() {
       markActivity();
       handleApiDiag();
+    });
+    server_.on("/planner", HTTP_GET, [this]() {
+      markActivity();
+      handlePlannerPage();
+    });
+    server_.on("/api/planner/tasks", HTTP_GET, [this]() {
+      markActivity();
+      handleApiPlannerTasksGet();
     });
     server_.on("/api/jobs", HTTP_GET, [this]() {
       markActivity();
@@ -253,6 +264,18 @@ void WebUiServer::handleRoot() {
   sendGzip(200, "text/html", kJobListPageHtmlGz, kJobListPageHtmlGzLen);
 }
 
+// Planner page (docs/planner.md) -- same auth gate as the job list, no new
+// login flow: an unauthenticated request is bounced to / (which shows the
+// login page) rather than serving the page shell to a logged-out session.
+void WebUiServer::handlePlannerPage() {
+  if (!requestHasValidSession()) {
+    server_.sendHeader("Location", "/");
+    server_.send(303, "text/plain", "");
+    return;
+  }
+  sendGzip(200, "text/html", kPlannerPageHtmlGz, kPlannerPageHtmlGzLen);
+}
+
 void WebUiServer::handleLogin() {
   // Deliberately not constant-time / not rate-limited — see
   // docs/security.md "On-device Web UI" for why that's an accepted
@@ -358,6 +381,56 @@ void WebUiServer::handleApiDiag() {
   if (battery.millivoltsKnown) doc["battery_millivolts"] = battery.millivolts;
 
   doc["heap_free_bytes"] = freeink::MemoryManager::instance().freeBytes();
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+// Merged tasks + calendar next-event for the Planner page -- reads
+// plannerTasks_ and the calendar module's singleton cache directly
+// on-device, no round-trip to the Pi (docs/architecture.md's "Planner
+// page" section). The `date` query param is accepted for shape parity
+// with the Pi's own GET .../planner/tasks?date=... contract
+// (docs/protocol.md §1.8), but not actually filtered on here: the
+// on-device store::TaskIndex has no per-task date field of its own --
+// it's inherently a single day's snapshot (whatever the last sync
+// pushed down), not a multi-day store -- so this always returns that
+// whole snapshot regardless of the param's value.
+void WebUiServer::handleApiPlannerTasksGet() {
+  if (!requestHasValidSession()) {
+    server_.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    return;
+  }
+
+  JsonDocument doc;
+  JsonArray arr = doc["tasks"].to<JsonArray>();
+  for (size_t i = 0; plannerTasks_ != nullptr && i < plannerTasks_->count(); i++) {
+    const store::TaskEntry& t = plannerTasks_->at(i);
+    JsonObject j = arr.add<JsonObject>();
+    j["id"] = t.id;
+    j["title"] = t.title;
+    j["category"] = store::categoryName(t.category);
+    j["start_time"] = t.startTime;
+    j["end_time"] = t.endTime;
+    j["done"] = t.done;
+    j["source"] = "task";
+  }
+
+  const config::NextEventInfo& event = config::CalendarCache::instance().data();
+  if (event.hasEvent) {
+    char hm[6];
+    ui::formatUtcHm(event.start, hm, sizeof(hm));  // UTC -- see that function's own caveat
+
+    JsonObject j = arr.add<JsonObject>();
+    j["id"] = "calendar";
+    j["title"] = event.title;
+    j["category"] = "Other";
+    j["start_time"] = hm;
+    j["end_time"] = hm;
+    j["done"] = false;
+    j["source"] = "calendar";
+  }
 
   String out;
   serializeJson(doc, out);

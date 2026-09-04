@@ -623,7 +623,7 @@ void initApp(App& app, InboxUiState& state) {
   // why webUiServer takes these post-construction rather than as
   // reference members.
   state.webUiServer.attach(state.jobs, state.outbox, state.deviceConfig, state.panelWidth, state.panelHeight,
-                            state.wakeMillis);
+                            state.wakeMillis, state.plannerTasks);
 
   ui::registerTimelineActions(app, state);
   ui::registerPomodoroActions(app, state);
