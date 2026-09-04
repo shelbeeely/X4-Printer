@@ -51,6 +51,14 @@ struct AppSettingsData {
   uint16_t pomodoroLongBreakMinutes = 15;
   uint16_t pomodoroSessionsBeforeLongBreak = 4;
   uint16_t pomodoroCheckpointMinutes = 5;
+
+  // Opt-in-on-top-of-opt-in: only takes effect while the on-device Web
+  // UI's hotspot mode (ui/WebUiServer.h::startHotspot(), Settings > Wifi)
+  // is active AND a known Wi-Fi network is in range -- see net/NatBridge.h
+  // and docs/security.md. Default off: today's fully-isolated hotspot
+  // behavior (a joined phone can only reach the X4 itself) is unchanged
+  // unless the user explicitly turns this on.
+  bool hotspotNatBridgeEnabled = false;
 };
 
 class AppSettings {
@@ -70,6 +78,7 @@ class AppSettings {
   void setCalendarWakeLeadMinutes(uint16_t value) { data_.calendarWakeLeadMinutes = value; }
   void setCalendarWakeAtEnd(bool value) { data_.calendarWakeAtEnd = value; }
   void setPlannerHorizontalView(bool value) { data_.plannerHorizontalView = value; }
+  void setHotspotNatBridgeEnabled(bool value) { data_.hotspotNatBridgeEnabled = value; }
 
  private:
   AppSettingsData data_;

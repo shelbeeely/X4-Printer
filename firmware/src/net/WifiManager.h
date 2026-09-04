@@ -21,9 +21,25 @@ class WifiManager {
   // timeoutMs.
   bool connect(uint32_t timeoutMs = 15000);
 
+  // Same scan/match/connect logic as connect(), but sets WIFI_AP_STA
+  // instead of WIFI_STA -- for net::NatBridge (firmware/src/net/
+  // NatBridge.h), which needs the station link to come up *alongside* an
+  // already-running softAP, not replacing it the way plain connect()'s
+  // WIFI_STA mode switch would (silently killing the AP and every phone
+  // currently joined to it).
+  bool connectKeepingAp(uint32_t timeoutMs = 15000);
+
   // Tears down the radio. Always safe to call even if connect() was never
   // called or already failed.
   void disconnect();
+
+  // Drops the station link only, leaving an already-running softAP alive
+  // -- the connectKeepingAp() counterpart to disconnect() above, and the
+  // only correct way to undo connectKeepingAp() -- for net::NatBridge
+  // (firmware/src/net/NatBridge.h), so its disable() doesn't need to
+  // duplicate this driver-mode-transition shape itself. A no-op-safe call
+  // to make even if no STA link is currently up.
+  void disconnectKeepingAp();
 
   bool isConnected() const;
   String currentSsid() const;

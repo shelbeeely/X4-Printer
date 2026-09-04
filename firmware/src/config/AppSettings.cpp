@@ -32,6 +32,7 @@ void AppSettings::load() {
   data_.pomodoroLongBreakMinutes = doc["pomodoro_long_break_minutes"] | 15;
   data_.pomodoroSessionsBeforeLongBreak = doc["pomodoro_sessions_before_long_break"] | 4;
   data_.pomodoroCheckpointMinutes = doc["pomodoro_checkpoint_minutes"] | 5;
+  data_.hotspotNatBridgeEnabled = doc["hotspot_nat_bridge_enabled"] | false;
 }
 
 bool AppSettings::save() const {
@@ -46,6 +47,7 @@ bool AppSettings::save() const {
   doc["pomodoro_long_break_minutes"] = data_.pomodoroLongBreakMinutes;
   doc["pomodoro_sessions_before_long_break"] = data_.pomodoroSessionsBeforeLongBreak;
   doc["pomodoro_checkpoint_minutes"] = data_.pomodoroCheckpointMinutes;
+  doc["hotspot_nat_bridge_enabled"] = data_.hotspotNatBridgeEnabled;
 
   String out;
   serializeJson(doc, out);

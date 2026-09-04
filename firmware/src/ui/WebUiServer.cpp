@@ -109,7 +109,7 @@ bool WebUiServer::startStation(uint32_t timeoutMs) {
   return true;
 }
 
-bool WebUiServer::startHotspot() {
+bool WebUiServer::startHotspot(bool natBridgeEnabled) {
   stop();
 
   WiFi.mode(WIFI_AP);  // initializes the radio so macAddress() below is valid
@@ -128,6 +128,12 @@ bool WebUiServer::startHotspot() {
   }
   mode_ = WebUiMode::Hotspot;
   beginCommon();
+
+  // Opt-in-on-top-of-opt-in (see net/NatBridge.h) -- a failed bridge
+  // attempt (no known network in range) leaves the hotspot itself
+  // running exactly as before, just without the bridge.
+  if (natBridgeEnabled) natBridge_.enable();
+
   return true;
 }
 
@@ -213,6 +219,7 @@ void WebUiServer::stop() {
   server_.stop();
   net::WifiManager wifi;
   if (mode_ == WebUiMode::Hotspot) {
+    if (natBridge_.isEnabled()) natBridge_.disable();
     wifi.stopAccessPoint();
   } else {
     wifi.disconnect();

@@ -18,6 +18,7 @@
 #include <WebServer.h>
 
 #include "config/DeviceConfig.h"
+#include "net/NatBridge.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 #include "store/PlannerStore.h"
@@ -74,8 +75,18 @@ class WebUiServer {
 
   // Broadcasts this device's own hotspot (a fresh random SSID/password
   // each time) and starts the server on the AP gateway IP. Returns false
-  // only if the radio itself fails to start.
-  bool startHotspot();
+  // only if the radio itself fails to start. If natBridgeEnabled is true
+  // (config::AppSettingsData::hotspotNatBridgeEnabled, Settings > Wifi),
+  // also attempts to bring up a concurrent station link to a known
+  // network and bridge hotspot clients through to it (net::NatBridge) --
+  // a failed bridge attempt (no known network in range) does not fail
+  // the hotspot itself, it just stays isolated as before.
+  bool startHotspot(bool natBridgeEnabled = false);
+
+  // Live status for ui/InboxUI.cpp's webUiScreen() -- true only once
+  // startHotspot(true) actually succeeded in bridging, not merely
+  // requested.
+  bool natBridgeActive() const { return natBridge_.isEnabled(); }
 
   // Stops the HTTP server and tears down whichever radio mode was
   // active. Safe to call when not active (isActive() == false).
@@ -112,6 +123,7 @@ class WebUiServer {
   uint32_t wakeMillis_ = 0;
 
   WebServer server_{80};
+  net::NatBridge natBridge_;
   WebUiMode mode_ = WebUiMode::Off;
   bool activityFlag_ = false;
   // WebServer::on() has no matching "remove handler" call, so routes are

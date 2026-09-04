@@ -295,9 +295,13 @@ void webUiScreen(App::ScreenType& screen, void* userPtr) {
   }
   screen.header("Web UI running", subtitle);
 
-  char body[128];
-  std::snprintf(body, sizeof(body), "On your phone, open http://%s/ and enter PIN %s",
-                state.webUiServer.address().c_str(), state.webUiServer.pin());
+  char body[160];
+  int written = std::snprintf(body, sizeof(body), "On your phone, open http://%s/ and enter PIN %s",
+                               state.webUiServer.address().c_str(), state.webUiServer.pin());
+  if (state.webUiServer.mode() == WebUiMode::Hotspot && written > 0 && static_cast<size_t>(written) < sizeof(body)) {
+    std::snprintf(body + written, sizeof(body) - static_cast<size_t>(written), "\nNAT bridge: %s",
+                  state.webUiServer.natBridgeActive() ? "on (reaches Pi/LAN)" : "off (device only)");
+  }
   screen.popup(body);
 
   const freeink::ui::FooterAction footer[] = {
@@ -373,15 +377,20 @@ const char* settingsTabName(SettingsTab tab) {
 // web UI, which is where that belongs instead (a phone's own keyboard).
 void settingsWifiTab(App::ScreenType& screen, InboxUiState& state) {
   config::WifiStore& store = config::WifiStore::instance();
+  size_t count = store.count();
 
-  if (store.count() == 0) {
+  if (count == 0) {
+    // The NAT bridge toggle (below) needs a saved network to bridge to,
+    // so it isn't worth surfacing yet either -- same "nothing to show
+    // until X is configured" early return as settingsSyncRelayTab().
     screen.popup("No saved Wi-Fi networks. Add one from the on-device Web UI (Inbox screen).");
     return;
   }
 
-  static freeink::ui::ListItem items[config::kMaxWifiNetworks];
+  // +1: a NAT bridge toggle row (net/NatBridge.h) appended after the
+  // saved networks.
+  static freeink::ui::ListItem items[config::kMaxWifiNetworks + 1];
   static char labels[config::kMaxWifiNetworks][config::kMaxSsidLen + 1];
-  size_t count = store.count();
   for (size_t i = 0; i < count; i++) {
     const config::WifiCredential& cred = store.at(i);
     std::snprintf(labels[i], sizeof(labels[i]), "%s", cred.ssid);
@@ -391,9 +400,16 @@ void settingsWifiTab(App::ScreenType& screen, InboxUiState& state) {
     items[i].actionValue = static_cast<int32_t>(i);
   }
 
+  items[count] = freeink::ui::ListItem{};
+  items[count].label = "Hotspot NAT bridge";
+  items[count].subtitle = "Lets hotspot clients reach the Pi/LAN";
+  items[count].toggle = true;
+  items[count].toggleChecked = state.appSettings != nullptr && state.appSettings->hotspotNatBridgeEnabled;
+  items[count].actionValue = static_cast<int32_t>(count);
+
   static int16_t selected = 0;
-  if (selected >= static_cast<int16_t>(count)) selected = 0;
-  screen.list(items, count, selected, ActionSettingsWifiRowSelect);
+  if (selected > static_cast<int16_t>(count)) selected = 0;
+  screen.list(items, count + 1, selected, ActionSettingsWifiRowSelect);
 
   if (state.settingsWifiRemoveIndex >= 0 && state.settingsWifiRemoveIndex < static_cast<int16_t>(count)) {
     const config::WifiCredential& target = store.at(static_cast<size_t>(state.settingsWifiRemoveIndex));
@@ -738,13 +754,15 @@ void initApp(App& app, InboxUiState& state) {
               // stays on WebUiChoice — webUiChoiceScreen shows the error once
             }
             break;
-          case 1:
-            if (s.webUiServer.startHotspot()) {
+          case 1: {
+            bool natBridge = s.appSettings != nullptr && s.appSettings->hotspotNatBridgeEnabled;
+            if (s.webUiServer.startHotspot(natBridge)) {
               s.mode = ScreenMode::WebUi;
             } else {
               s.webUiStartError = "Could not start hotspot";
             }
             break;
+          }
           default:
             s.mode = ScreenMode::Inbox;  // Cancel
             break;
@@ -811,7 +829,18 @@ void initApp(App& app, InboxUiState& state) {
   app.on(
       ActionSettingsWifiRowSelect,
       [](const freeink::ui::ActionEvent& event, void* userPtr) {
-        static_cast<InboxUiState*>(userPtr)->settingsWifiRemoveIndex = static_cast<int16_t>(event.value);
+        auto& s = *static_cast<InboxUiState*>(userPtr);
+        size_t count = config::WifiStore::instance().count();
+        if (static_cast<size_t>(event.value) >= count) {
+          // The NAT bridge toggle row, appended after the saved-network
+          // list -- see settingsWifiTab().
+          if (s.appSettings == nullptr) return;
+          s.appSettings->hotspotNatBridgeEnabled = !s.appSettings->hotspotNatBridgeEnabled;
+          config::AppSettings::instance().setHotspotNatBridgeEnabled(s.appSettings->hotspotNatBridgeEnabled);
+          config::AppSettings::instance().save();
+          return;
+        }
+        s.settingsWifiRemoveIndex = static_cast<int16_t>(event.value);
       },
       &state);
 
