@@ -87,6 +87,24 @@ the physical UI.
   (`firmware/src/store/ApprovalOutbox.h`), the exact same durable-outbox
   path the physical buttons use, so it inherits the same
   `docs/protocol.md` §3 guarantees once it eventually syncs to the Pi.
+- **Optional NAT bridging for Hotspot mode, off by default and a real,
+  broadened exception to "the X4 never accepts inbound connections."**
+  `AppSettings.hotspotNatBridgeEnabled` (default off) lets a phone joined
+  to the device's own SoftAP also reach the Pi/internet, by bringing up a
+  concurrent STA connection to a known network and forwarding traffic
+  between the two interfaces. Accepted tradeoff, stated plainly: a client
+  on the bridged hotspot can reach whatever the device's own saved Wi-Fi
+  network can reach — the home LAN, not just the X4 itself — which is a
+  materially larger exposure than the isolated-hotspot default. This is
+  why the toggle defaults off and sits behind the Web UI's own opt-in
+  toggle (two explicit steps, not one), and why it's scoped as narrowly as
+  the underlying platform allows — a full transparent NAT (lwIP NAPT)
+  isn't available in this project's pinned Arduino-ESP32 build, so the
+  actual implementation is a single-port forward to the Pi's sync-API port
+  only, not general routing. See `docs/planner.md` for why this piece of
+  esp32_nat_router's design was borrowed at all (it isn't part of the
+  planner/Pomodoro feature itself) and `docs/architecture.md`'s "On-device
+  Web UI (opt-in)" for the mechanism.
 
 ## Admin web console (`admin_api.py`)
 

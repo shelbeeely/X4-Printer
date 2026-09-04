@@ -34,7 +34,7 @@ bool loadPlannerIndex(TaskIndex& index) {
     std::strncpy(e.id, t["id"] | "", sizeof(e.id) - 1);
     std::strncpy(e.title, t["title"] | "", sizeof(e.title) - 1);
     Category category = Category::Other;
-    parseCategoryName(t["category"] | "other", category);  // defaults to Other on missing/bad value
+    parseCategoryName(t["category"] | "Other", category);  // defaults to Other on missing/bad value
     e.category = category;
     std::strncpy(e.startTime, t["start_time"] | "", sizeof(e.startTime) - 1);
     std::strncpy(e.endTime, t["end_time"] | "", sizeof(e.endTime) - 1);

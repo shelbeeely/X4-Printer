@@ -21,6 +21,7 @@ trusts another's retries not to duplicate.
 | Path | What it is | Key entry points |
 |---|---|---|
 | `firmware/` | ESP32-C3 firmware for the X4: sync client, offline reader/approval UI, deep-sleep scheduler. Built on the FreeInk SDK (external library dependency, not vendored). | `firmware/src/main.cpp`, `firmware/src/sync/SyncManager.*`, `firmware/src/net/SyncClient.*`, `firmware/src/store/{JobStore,ApprovalOutbox}.*`, `firmware/platformio.ini` |
+| Planner/Pomodoro (`firmware/` + `pi-server/`) | Color-coded/icon-based daily timeline (merged with the calendar feature) and a checkpoint-wake Pomodoro timer — see `docs/planner.md`. | `firmware/src/store/PlannerStore.*`, `firmware/src/ui/{CategoryStyle,PlannerUI,PomodoroUI}.*`, `firmware/src/pomodoro/PomodoroSession.*`, `firmware/src/ui/pages/planner.html`, `pi-server/focusink_server/planner.py` |
 | `pi-server/` | Raspberry Pi print server: IPP/mDNS printer endpoint, PDF→XTC conversion, SQLite job queue, device sync API, CUPS forwarding, relay client. | `pi-server/focusink_server/{server,ipp_server,convert,xtc_writer,db,sync_api,printer_forward,relay_client}.py` |
 | `relay/` | Optional cloud relay for approving prints away from home; carries approval envelopes (device/job IDs, actions, timestamps) only, never document bytes. | `relay/relay_server/{app,server,db}.py` |
 | `tools/simulate_x4.py` | Fake X4 client speaking the real sync protocol, used by integration tests (and available standalone) to exercise the Pi/relay without hardware. | `tools/simulate_x4.py` |
@@ -142,6 +143,10 @@ cd firmware && pio run -e wokwi_sync_test
   summary (§3).
 - `docs/relay.md` — what the optional cloud relay is for, what it does and
   doesn't carry, and how to deploy it.
+- `docs/planner.md` — the visual timeline + Pomodoro feature: icon+pattern
+  vs. color coding across the native and on-device-web surfaces,
+  horizontal/vertical modes, checkpoint-wake Pomodoro, and how it merges
+  with the existing calendar feature.
 - `docs/security.md` — threat model and what is/isn't covered (this is a
   prototype for home/personal-scale deployment, not a hardened multi-tenant
   product).

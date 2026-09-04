@@ -48,7 +48,7 @@ away from home.
 | Component | Role | Built on |
 |---|---|---|
 | `pi-server/` | Print server: IPP receiver, PDF→XTC conversion, durable job queue, device sync API, CUPS forwarding, relay polling | Pure-stdlib Python (`http.server`, `sqlite3`, `ssl`) + PyMuPDF + Pillow, IPP wire format modeled on `paperlesspaper/paperlessprinter`'s hand-rolled `BaseHTTPRequestHandler` IPP server |
-| `firmware/` | On-device sync client, offline reader, offline approval capture, deep-sleep scheduler | FreeInk SDK (`EInkDisplay`, `SDCardManager`, `PowerManager`, `InputManager`, `FreeInkUI`/`FreeInkApp`), architecture patterned on `crosspoint-reader` (HAL usage, `PersistableStore`-style atomic JSON persistence, streaming HTTP downloader) |
+| `firmware/` | On-device sync client, offline reader, offline approval capture, deep-sleep scheduler, and a visual planner/Pomodoro timer (`store::PlannerStore`, `pomodoro::PomodoroSession`, `ui::PlannerUI`/`ui::PomodoroUI` — see `docs/planner.md`) | FreeInk SDK (`EInkDisplay`, `SDCardManager`, `PowerManager`, `InputManager`, `FreeInkUI`/`FreeInkApp`), architecture patterned on `crosspoint-reader` (HAL usage, `PersistableStore`-style atomic JSON persistence, streaming HTTP downloader) |
 | `relay/` | Store-and-forward for approval envelopes only, so the X4 can approve prints away from home without exposing the home network | Pure-stdlib Python, same style as `pi-server` |
 
 ## Why these reference projects, and where this project departs from them
@@ -219,6 +219,19 @@ Implements the task exactly as specified:
    `armPowerButtonWakeup()` + `armWakeOnPins()` (RTC alarm pin, if a timed
    wake is configured) → `deepSleep()`.
 
+The RTC alarm target itself comes from `main.cpp`'s
+`nextWakeIntervalSeconds()`, which already folds calendar-driven near-wakes
+(an upcoming event's start/end reminder) into the default hourly cadence.
+An active Pomodoro session (`docs/planner.md`) joins that same decision:
+`PomodoroSession::secondsUntilNextCheckpoint()` is a pure function
+composed in via `std::min` alongside the calendar result, so the device
+wakes at whichever is sooner — a checkpoint redraw or the regular sync
+window — rather than running a second, independent wake timer. This is
+deliberately a **checkpoint** cadence (every few minutes, configurable),
+not a live tick: the device has no continuously-updating display mode, and
+a Pomodoro countdown is no exception to "wakes only on button press or its
+own RTC timer."
+
 Between wake and sleep, if the user is actively interacting with the Print
 Inbox UI (paging, approving), the sync sequence above only runs once at
 boot; further approvals during the session are appended to the
@@ -317,6 +330,17 @@ easy reach, or (hotspot mode) away from any known network entirely.
   periodic status poll counts as activity, an idle one doesn't, and
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
+- **Optional hotspot NAT bridging, off by default.** Today, Hotspot mode
+  is a fully isolated SoftAP — a phone that joins it can only reach the
+  device's own local pages, with no path to the Pi (see "On-device Web UI
+  full-document preview" below on why that link is station-mode-only). A
+  separate, still-opt-in `AppSettings.hotspotNatBridgeEnabled` toggle
+  (default off) lets a phone on the hotspot also reach the Pi/internet by
+  concurrently joining a known network as STA alongside the AP. This is a
+  broadened exception to "the X4 never accepts inbound connections," on
+  top of the Web UI's own exception above — see `docs/security.md` "On-
+  device Web UI" for the tradeoff (a bridged hotspot client can reach the
+  home LAN, not just the device itself) and why it stays default-off.
 
 ### Direct upload
 
@@ -478,6 +502,22 @@ gating:
   fallback/"view all", and the inline fetch fails soft (leaves the list
   empty) on any network error, non-2xx status, or CORS failure — same
   "worst case is nothing shown" rule as the thumbnails.
+
+### Planner page
+
+`GET /planner` (`WebUiServer.cpp`) is a third page alongside `login.html`/
+`joblist.html`, reusing the exact same PIN/session-cookie gate and
+idle-timeout teardown — no new auth code, no new security surface class.
+It renders the day's merged tasks + calendar events
+(`GET /api/planner/tasks?date=YYYY-MM-DD`, reading `store::PlannerStore`
+and `calendar::CalendarSync`'s cached events directly on-device, no
+round-trip to the Pi needed for this view) as genuinely color-coded cards
+using `docs/design-system.md`'s tokens — deliberately different coding
+from the native e-paper Timeline screen's icon+dither-pattern approach,
+since this surface (a phone browser) isn't limited to 1bpp. See
+`docs/planner.md` for the full feature writeup, including why the native
+screens and this page use two different visual codings for the same eight
+categories.
 
 ### On-device diagnostics panel
 

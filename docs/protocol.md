@@ -236,6 +236,85 @@ behaves exactly like an IPP-submitted one for every purpose downstream
 (listed to devices, downloadable, printable) — its only difference is
 `jobs.source = "x4_upload"` instead of `"ipp"`.
 
+### 1.8 Planner & Pomodoro API
+
+See `docs/planner.md` for the feature this backs (color-coded/icon-based
+timeline + Pomodoro, `pi-server/focusink_server/planner.py`). Tasks are
+authored on the Pi (admin console) and pulled by the device on its normal
+sync pass, the same "authored centrally, pushed to the device" shape §1.6
+uses for calendars/Wi-Fi — except per-device and per-day rather than
+household-wide.
+
+#### `GET /devices/{device_id}/planner/tasks?date=<YYYY-MM-DD>`
+
+```json
+{
+  "tasks": [
+    {"id": 1, "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15", "done": false}
+  ],
+  "server_time": 1737590500
+}
+```
+
+`category` is one of `Work`, `Break`, `Chore`, `Health`, `Social`,
+`School`, `Personal`, `Other` (`planner.CATEGORIES`) — the fixed set the
+firmware's `store::Category` enum and the on-device web UI's
+`planner.html` both key off of; do not reorder or extend without updating
+all three. `date` is required; a missing or malformed value is a `400`.
+Response is wrapped `{"tasks": [...], "server_time": ...}` to match §1.1's
+job-list shape, unlike §1.9 below.
+
+#### `POST /devices/{device_id}/planner/tasks/{task_id}/complete`
+
+Body:
+
+```json
+{"completion_id": "c1a2...f0"}
+```
+
+`completion_id` is generated **on the device**, the same idempotency-key
+philosophy `approval_id` uses (§1.4) — a client-generated key created
+before the sync attempt, so a retried POST (dropped connection, device
+reboot mid-sync) is a no-op rather than a duplicate. Unlike an approval,
+completing a task has no external side effect (no `lp` call) — just
+flipping `planner_tasks.done` — so the Pi records and applies it in one
+SQLite transaction (`Database.complete_task_if_new`) rather than
+`apply_approval`'s record → external-effect → mark-applied split.
+
+Response:
+
+```json
+{"completion_id": "c1a2...f0", "task_id": 1, "status": "applied", "done": true}
+```
+
+`status` is `applied` (first time this `completion_id` was seen) or
+`already_applied` (dedup hit — `done` still reflects the real, unchanged
+state). A `task_id` that doesn't exist, or belongs to a different device,
+is a `404`.
+
+### 1.9 `GET /devices/{device_id}/pomodoro/config`
+
+Per-device Pomodoro durations, defaulting to
+`planner.DEFAULT_POMODORO_CONFIG` when a device has never had its own
+config set (no server-side provisioning step needed at pairing time).
+Response is the bare config dict — no `{"...": ..., "server_time": ...}`
+wrapper, unlike every other GET in this section, since the contract here
+*is* the full literal shape:
+
+```json
+{
+  "work_minutes": 25,
+  "break_minutes": 5,
+  "long_break_minutes": 15,
+  "sessions_before_long_break": 4,
+  "checkpoint_minutes": 5
+}
+```
+
+`checkpoint_minutes` is how often the device's RTC timer wakes it to
+redraw remaining time during an active session — see `docs/planner.md`
+for why this is a checkpoint cadence, not a live tick.
+
 ## 2. Relay Protocol (X4 <-> Relay <-> Pi, over the internet)
 
 Base URL: `https://<relay-host>/relay/v1`. Both the Pi and the X4 authenticate
@@ -299,6 +378,7 @@ and previews on the LAN only.
 | Relay `approvals` table | `approval_id` (UNIQUE) | Duplicate POST from a flaky retry just returns `queued` again, no duplicate delivery to the Pi |
 | Device outbox | `approval_id` generated once, stored durably before any network attempt | Reboots/power loss mid-sync never lose or duplicate an approval — the outbox entry is retried until acked, using the same id |
 | Pi `jobs` table (§1.7) | `job_id` (PRIMARY KEY), caller-supplied by the direct-upload endpoint | A retried upload (dropped connection after the Pi already ingested it) is a no-op (`status=already_exists`), not a duplicate row or conversion pass |
+| Pi `task_completions` table (§1.8) | `completion_id` (PRIMARY KEY), device-generated | A retried completion POST is a no-op (`status=already_applied`); `planner_tasks.done` is only ever flipped once, inside the same transaction as the ledger insert |
 
 ## 4. XTC/XTG file format
 

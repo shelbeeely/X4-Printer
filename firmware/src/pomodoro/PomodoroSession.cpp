@@ -25,7 +25,14 @@ bool loadPomodoroSession(PomodoroSession& session) {
   if (deserializeJson(doc, raw)) return false;
 
   PomodoroState s;
-  s.phase = static_cast<Phase>(uint8_t(doc["phase"] | 0));
+  uint8_t rawPhase = doc["phase"] | 0;
+  // Defensive: a corrupt/out-of-range value (e.g. a hand-edited or
+  // partially-written state.json) falls back to Idle rather than an
+  // unrecognized Phase that transitionOnce()'s switch has no case for --
+  // same "malformed -> treat as safe default" spirit as
+  // PlannerStore.cpp's category parsing and CategoryStyle::styleFor()'s
+  // out-of-range clamp.
+  s.phase = rawPhase <= static_cast<uint8_t>(Phase::LongBreak) ? static_cast<Phase>(rawPhase) : Phase::Idle;
   s.phaseStart = static_cast<time_t>(doc["phase_start"] | 0);
   s.phaseEnd = static_cast<time_t>(doc["phase_end"] | 0);
   s.completedWorkSessions = doc["completed_work_sessions"] | 0;

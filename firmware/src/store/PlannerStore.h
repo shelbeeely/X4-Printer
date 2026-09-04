@@ -39,61 +39,66 @@ enum class Category : uint8_t {
   Other,
 };
 
+// Title-case, matching pi-server/focusink_server/planner.py's CATEGORIES
+// tuple and docs/protocol.md §1.8's wire examples EXACTLY -- these strings
+// round-trip over the sync API (GET .../planner/tasks), so firmware and
+// Pi must agree byte-for-byte, not just on the same 8 names.
 inline const char* categoryName(Category c) {
   switch (c) {
     case Category::Work:
-      return "work";
+      return "Work";
     case Category::Break:
-      return "break";
+      return "Break";
     case Category::Chore:
-      return "chore";
+      return "Chore";
     case Category::Health:
-      return "health";
+      return "Health";
     case Category::Social:
-      return "social";
+      return "Social";
     case Category::School:
-      return "school";
+      return "School";
     case Category::Personal:
-      return "personal";
+      return "Personal";
     case Category::Other:
-      return "other";
+      return "Other";
   }
-  return "other";
+  return "Other";
 }
 
 // Inverse of categoryName(). Returns false (out left unchanged) for
 // anything unrecognized, so callers can default to Category::Other
 // explicitly rather than have this function paper over a malformed value.
+// Case-sensitive, matching categoryName()'s Title-case wire format exactly.
 inline bool parseCategoryName(const char* s, Category& out) {
-  if (std::strcmp(s, "work") == 0) {
+  if (std::strcmp(s, "Work") == 0) {
     out = Category::Work;
     return true;
   }
-  if (std::strcmp(s, "break") == 0) {
+  if (std::strcmp(s, "Break") == 0) {
     out = Category::Break;
     return true;
   }
-  if (std::strcmp(s, "chore") == 0) {
+  if (std::strcmp(s, "Chore") == 0) {
     out = Category::Chore;
     return true;
   }
-  if (std::strcmp(s, "health") == 0) {
+  if (std::strcmp(s, "Health") == 0) {
     out = Category::Health;
     return true;
   }
-  if (std::strcmp(s, "social") == 0) {
+  if (std::strcmp(s, "Social") == 0) {
     out = Category::Social;
     return true;
   }
-  if (std::strcmp(s, "school") == 0) {
+  if (std::strcmp(s, "School") == 0) {
     out = Category::School;
     return true;
   }
-  if (std::strcmp(s, "personal") == 0) {
+  if (std::strcmp(s, "Personal") == 0) {
     out = Category::Personal;
     return true;
   }
-  if (std::strcmp(s, "other") == 0) {
+  if (std::strcmp(s, "Other") == 0) {
     out = Category::Other;
     return true;
   }
