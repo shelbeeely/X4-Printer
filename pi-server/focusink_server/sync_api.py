@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import parse_qs, urlsplit
 
+from . import planner
 from .config import Config
 from .convert import ConversionError, ingest_document
 from .db import Database
@@ -111,6 +112,10 @@ class SyncApiHandler(BaseHTTPRequestHandler):
             self._handle_device_config(rest[1])
         elif len(rest) == 3 and rest[0] == "jobs" and rest[2] == "xtc":
             self._handle_download_xtc(rest[1], parsed.query)
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "planner" and rest[3] == "tasks":
+            self._handle_list_planner_tasks(rest[1], parsed.query)
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "pomodoro" and rest[3] == "config":
+            self._handle_pomodoro_config(rest[1])
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -128,6 +133,14 @@ class SyncApiHandler(BaseHTTPRequestHandler):
             self._handle_approval()
         elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "jobs":
             self._handle_upload_original(rest[1], rest[3], parsed.query)
+        elif (
+            len(rest) == 6
+            and rest[0] == "devices"
+            and rest[2] == "planner"
+            and rest[3] == "tasks"
+            and rest[5] == "complete"
+        ):
+            self._handle_complete_task(rest[1], rest[4])
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -158,6 +171,67 @@ class SyncApiHandler(BaseHTTPRequestHandler):
         calendars = [{"url": row["url"], "label": row["label"]} for row in self.db.list_calendar_feeds()]
         wifi_networks = [{"ssid": row["ssid"], "password": row["password"]} for row in self.db.list_wifi_networks()]
         self._send_json(200, {"calendars": calendars, "wifi_networks": wifi_networks, "server_time": int(time.time())})
+
+    def _handle_list_planner_tasks(self, path_device_id: str, query: str) -> None:
+        """Planner/Pomodoro feature: one day's tasks for this device,
+        authored on the Pi (admin console) the same way calendar feeds are
+        -- see planner.py and docs/planner.md. Wrapped as {"tasks": [...],
+        "server_time": ...} to mirror _handle_list_jobs's own GET shape."""
+        device_id = self._authenticate()
+        if device_id is None:
+            return
+        if device_id != path_device_id:
+            self._send_json(403, {"error": "device id mismatch"})
+            return
+        date = (parse_qs(query).get("date", [""])[0] or "").strip()
+        if not date or not planner.is_valid_date(date):
+            self._send_json(400, {"error": "missing or invalid date (expected YYYY-MM-DD)"})
+            return
+        tasks = planner.list_tasks(self.db, device_id, date)
+        self._send_json(200, {"tasks": tasks, "server_time": int(time.time())})
+
+    def _handle_pomodoro_config(self, path_device_id: str) -> None:
+        """Per-device Pomodoro durations, defaulting to
+        planner.DEFAULT_POMODORO_CONFIG when unset -- see docs/planner.md.
+        Response is exactly the 5-key config dict, no wrapper: unlike the
+        tasks list, this endpoint's response shape is the full literal
+        contract, not a job-sync-GET-style envelope."""
+        device_id = self._authenticate()
+        if device_id is None:
+            return
+        if device_id != path_device_id:
+            self._send_json(403, {"error": "device id mismatch"})
+            return
+        self._send_json(200, planner.get_pomodoro_config(self.db, device_id))
+
+    def _handle_complete_task(self, path_device_id: str, task_id_str: str) -> None:
+        """Idempotent task-completion sync-back -- same completion_id
+        idempotency-key shape as _handle_approval's approval_id, applied
+        via planner.complete_task/db.complete_task_if_new's single
+        transaction (see that method's docstring for why this doesn't need
+        approval's record/apply/mark-applied split)."""
+        device_id = self._authenticate()
+        if device_id is None:
+            return
+        if device_id != path_device_id:
+            self._send_json(403, {"error": "device id mismatch"})
+            return
+        try:
+            task_id = int(task_id_str)
+        except ValueError:
+            self._send_json(400, {"error": "invalid task id"})
+            return
+        body = self._read_json_body()
+        if body is None or not body.get("completion_id"):
+            self._send_json(400, {"error": "missing completion_id"})
+            return
+        result = planner.complete_task(
+            self.db, device_id=device_id, task_id=task_id, completion_id=str(body["completion_id"])
+        )
+        if result is None:
+            self._send_json(404, {"error": "task not found"})
+            return
+        self._send_json(200, result)
 
     def _handle_list_jobs(self, path_device_id: str, query: str) -> None:
         device_id = self._authenticate()

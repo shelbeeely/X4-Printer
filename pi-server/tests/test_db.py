@@ -292,3 +292,80 @@ def test_delete_wifi_network(db: Database):
     network_id = db.add_or_update_wifi_network("HomeWiFi", "pw1")
     db.delete_wifi_network(network_id)
     assert db.list_wifi_networks() == []
+
+
+def test_insert_and_list_planner_tasks_scoped_by_device_and_date(db: Database):
+    task_id = db.insert_planner_task(
+        device_id="dev1", date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    db.insert_planner_task(
+        device_id="dev1", date="2026-09-04", title="Lunch", category="Break",
+        start_time="12:00", end_time="13:00",
+    )
+    db.insert_planner_task(
+        device_id="dev1", date="2026-09-05", title="Other day", category="Other",
+        start_time="10:00", end_time="10:30",
+    )
+    db.insert_planner_task(
+        device_id="dev2", date="2026-09-04", title="Other device", category="Other",
+        start_time="08:00", end_time="08:30",
+    )
+
+    rows = db.list_planner_tasks("dev1", "2026-09-04")
+    assert [r["title"] for r in rows] == ["Standup", "Lunch"]  # ordered by start_time
+    assert rows[0]["id"] == task_id
+    assert rows[0]["done"] == 0
+
+
+def test_complete_task_if_new_is_idempotent(db: Database):
+    task_id = db.insert_planner_task(
+        device_id="dev1", date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    first = db.complete_task_if_new(device_id="dev1", task_id=task_id, completion_id="c1")
+    assert first is not None
+    applied_now, row = first
+    assert applied_now is True
+    assert row["done"] == 1
+
+    second = db.complete_task_if_new(device_id="dev1", task_id=task_id, completion_id="c1")
+    applied_now2, row2 = second
+    assert applied_now2 is False
+    assert row2["done"] == 1
+
+    count = db.query_one("SELECT COUNT(*) AS n FROM task_completions WHERE task_id = ?", (task_id,))
+    assert count["n"] == 1
+
+
+def test_complete_task_unknown_or_wrong_device_returns_none(db: Database):
+    task_id = db.insert_planner_task(
+        device_id="dev1", date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    assert db.complete_task_if_new(device_id="dev1", task_id=999999, completion_id="c1") is None
+    assert db.complete_task_if_new(device_id="dev2", task_id=task_id, completion_id="c1") is None
+
+
+def test_pomodoro_config_defaults_to_none_when_unset(db: Database):
+    assert db.get_pomodoro_config("dev1") is None
+
+
+def test_set_pomodoro_config_round_trips(db: Database):
+    db.set_pomodoro_config(
+        "dev1", work_minutes=30, break_minutes=6, long_break_minutes=20,
+        sessions_before_long_break=3, checkpoint_minutes=2,
+    )
+    row = db.get_pomodoro_config("dev1")
+    assert row["work_minutes"] == 30
+    assert row["break_minutes"] == 6
+    assert row["long_break_minutes"] == 20
+    assert row["sessions_before_long_break"] == 3
+    assert row["checkpoint_minutes"] == 2
+
+    # Upsert overwrites, doesn't duplicate.
+    db.set_pomodoro_config(
+        "dev1", work_minutes=45, break_minutes=6, long_break_minutes=20,
+        sessions_before_long_break=3, checkpoint_minutes=2,
+    )
+    assert db.get_pomodoro_config("dev1")["work_minutes"] == 45

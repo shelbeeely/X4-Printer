@@ -109,6 +109,55 @@ CREATE TABLE IF NOT EXISTS wifi_networks (
     position INTEGER NOT NULL
 );
 
+-- Planner tasks: authored on the Pi (admin console / future planner UI)
+-- and pulled by each device on its normal sync pass -- same "authored
+-- centrally, pushed to the device" shape as calendar_feeds/wifi_networks
+-- above, except per-device (device_id) and per-day (date) rather than
+-- household-wide. `done` flips to 1 through the device's own completion
+-- sync-back (POST .../complete) -- see task_completions.
+CREATE TABLE IF NOT EXISTS planner_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    date TEXT NOT NULL,           -- 'YYYY-MM-DD'
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,       -- one of planner.CATEGORIES
+    start_time TEXT NOT NULL,     -- 'HH:MM', 24h, local to the device
+    end_time TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_planner_tasks_device_date ON planner_tasks(device_id, date);
+
+-- Idempotency ledger for task-completion sync-back -- same shape as
+-- approvals.approval_id: completion_id is a client-generated (X4-side)
+-- key, so a retried POST .../complete is a no-op, not a duplicate. Unlike
+-- approvals there is no external side effect to protect (no CUPS call,
+-- just planner_tasks.done), so complete_task_if_new() does the whole
+-- record-and-apply in one literal transaction rather than the
+-- record/apply/mark-applied split apply_approval() needs.
+CREATE TABLE IF NOT EXISTS task_completions (
+    completion_id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    task_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_completions_task ON task_completions(task_id);
+
+-- Per-device Pomodoro timer configuration, pulled via
+-- GET /devices/{id}/pomodoro/config. One row per device; a missing row
+-- means "use the defaults" (see planner.DEFAULT_POMODORO_CONFIG), so
+-- pairing a new device needs no server-side provisioning step.
+CREATE TABLE IF NOT EXISTS pomodoro_config (
+    device_id TEXT PRIMARY KEY,
+    work_minutes INTEGER NOT NULL DEFAULT 25,
+    break_minutes INTEGER NOT NULL DEFAULT 5,
+    long_break_minutes INTEGER NOT NULL DEFAULT 15,
+    sessions_before_long_break INTEGER NOT NULL DEFAULT 4,
+    checkpoint_minutes INTEGER NOT NULL DEFAULT 5
+);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_device ON approvals(device_id);
 """
@@ -488,3 +537,88 @@ class Database:
     def delete_wifi_network(self, network_id: int) -> None:
         with self.transaction() as conn:
             conn.execute("DELETE FROM wifi_networks WHERE id = ?", (network_id,))
+
+    # -- Planner tasks (per-device, synced) ------------------------------------
+
+    def list_planner_tasks(self, device_id: str, date: str) -> list[sqlite3.Row]:
+        return self.query(
+            "SELECT * FROM planner_tasks WHERE device_id = ? AND date = ? ORDER BY start_time ASC, id ASC",
+            (device_id, date),
+        )
+
+    def insert_planner_task(
+        self, *, device_id: str, date: str, title: str, category: str, start_time: str, end_time: str
+    ) -> int:
+        with self.transaction() as conn:
+            cur = conn.execute(
+                """INSERT INTO planner_tasks
+                   (device_id, date, title, category, start_time, end_time, done, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
+                (device_id, date, title, category, start_time, end_time, int(time.time())),
+            )
+            return cur.lastrowid
+
+    def get_planner_task(self, task_id: int) -> Optional[sqlite3.Row]:
+        return self.query_one("SELECT * FROM planner_tasks WHERE id = ?", (task_id,))
+
+    def delete_planner_task(self, task_id: int) -> None:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM planner_tasks WHERE id = ?", (task_id,))
+
+    def complete_task_if_new(
+        self, *, device_id: str, task_id: int, completion_id: str
+    ) -> Optional[tuple[bool, sqlite3.Row]]:
+        """Idempotent task-completion sync-back, same completion_id/
+        approval_id shape as record_approval_if_new -- but unlike
+        apply_approval's record/apply/mark-applied split (needed because
+        submit_to_cups can't run inside a DB transaction), there is no
+        external side effect here (just flipping planner_tasks.done), so
+        the whole record-and-apply happens in one transaction. Returns
+        None if task_id doesn't exist or isn't owned by device_id (caller
+        sends 404); otherwise (applied_now, task_row) where applied_now is
+        True only for the call that actually flipped `done` -- a retried
+        completion_id returns False with the (already-done) row unchanged."""
+        with self.transaction() as conn:
+            task = conn.execute(
+                "SELECT * FROM planner_tasks WHERE id = ? AND device_id = ?", (task_id, device_id)
+            ).fetchone()
+            if task is None:
+                return None
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO task_completions (completion_id, device_id, task_id, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (completion_id, device_id, task_id, int(time.time())),
+            )
+            applied_now = cur.rowcount == 1
+            if applied_now:
+                conn.execute("UPDATE planner_tasks SET done = 1 WHERE id = ?", (task_id,))
+            task = conn.execute("SELECT * FROM planner_tasks WHERE id = ?", (task_id,)).fetchone()
+            return applied_now, task
+
+    def get_pomodoro_config(self, device_id: str) -> Optional[sqlite3.Row]:
+        return self.query_one("SELECT * FROM pomodoro_config WHERE device_id = ?", (device_id,))
+
+    def set_pomodoro_config(
+        self,
+        device_id: str,
+        *,
+        work_minutes: int,
+        break_minutes: int,
+        long_break_minutes: int,
+        sessions_before_long_break: int,
+        checkpoint_minutes: int,
+    ) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                """INSERT INTO pomodoro_config
+                   (device_id, work_minutes, break_minutes, long_break_minutes,
+                    sessions_before_long_break, checkpoint_minutes)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(device_id) DO UPDATE SET
+                     work_minutes=excluded.work_minutes, break_minutes=excluded.break_minutes,
+                     long_break_minutes=excluded.long_break_minutes,
+                     sessions_before_long_break=excluded.sessions_before_long_break,
+                     checkpoint_minutes=excluded.checkpoint_minutes""",
+                (device_id, work_minutes, break_minutes, long_break_minutes, sessions_before_long_break,
+                 checkpoint_minutes),
+            )

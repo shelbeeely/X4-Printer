@@ -262,3 +262,91 @@ def test_approval_device_mismatch_rejected(running_sync_api):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(f"{base}/approvals", body)
     assert exc.value.code == 403
+
+
+# -- Planner tasks + Pomodoro config -----------------------------------------
+
+
+def test_list_planner_tasks_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_list_planner_tasks_rejects_device_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/dev-other/planner/tasks?date=2026-09-04")
+    assert exc.value.code == 403
+
+
+def test_list_planner_tasks_400_on_missing_date(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks")
+    assert exc.value.code == 400
+
+
+def test_list_planner_tasks_400_on_malformed_date(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=not-a-date")
+    assert exc.value.code == 400
+
+
+def test_list_planner_tasks_returns_seeded_tasks(running_sync_api):
+    base, db, _config = running_sync_api
+    from focusink_server import planner
+
+    planner.create_task(
+        db, device_id=DEVICE_ID, date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert len(resp["tasks"]) == 1
+    assert resp["tasks"][0]["title"] == "Standup"
+    assert resp["tasks"][0]["done"] is False
+    assert "server_time" in resp
+
+
+def test_pomodoro_config_returns_defaults_when_unset(running_sync_api):
+    base, _db, _config = running_sync_api
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert resp == {
+        "work_minutes": 25,
+        "break_minutes": 5,
+        "long_break_minutes": 15,
+        "sessions_before_long_break": 4,
+        "checkpoint_minutes": 5,
+    }
+
+
+def test_complete_planner_task_idempotent_over_http(running_sync_api):
+    base, db, _config = running_sync_api
+    from focusink_server import planner
+
+    task_id = planner.create_task(
+        db, device_id=DEVICE_ID, date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    url = f"{base}/devices/{DEVICE_ID}/planner/tasks/{task_id}/complete"
+
+    resp1 = json.loads(_post(url, {"completion_id": "c1"}).read())
+    assert resp1["status"] == "applied"
+    assert resp1["done"] is True
+
+    resp2 = json.loads(_post(url, {"completion_id": "c1"}).read())
+    assert resp2["status"] == "already_applied"
+    assert resp2["done"] is True
+
+    count = db.query_one("SELECT COUNT(*) AS n FROM task_completions WHERE task_id = ?", (task_id,))
+    assert count["n"] == 1
+
+
+def test_complete_planner_task_not_found(running_sync_api):
+    base, _db, _config = running_sync_api
+    url = f"{base}/devices/{DEVICE_ID}/planner/tasks/999999/complete"
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(url, {"completion_id": "c1"})
+    assert exc.value.code == 404
