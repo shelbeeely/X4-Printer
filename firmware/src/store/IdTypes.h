@@ -9,5 +9,9 @@ namespace store {
 
 constexpr size_t kJobIdLen = 32;
 constexpr size_t kApprovalIdLen = 32;
+// Planner task IDs are device-generated (esp_random()-based, same
+// convention as approvalId in ApprovalOutbox.h), not server-issued like
+// jobId.
+constexpr size_t kTaskIdLen = 32;
 
 }  // namespace store

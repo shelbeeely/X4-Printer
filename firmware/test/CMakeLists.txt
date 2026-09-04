@@ -33,3 +33,5 @@ add_test(
 add_subdirectory(job_store)
 add_subdirectory(approval_outbox)
 add_subdirectory(calendar_wake)
+add_subdirectory(planner_store)
+add_subdirectory(category_style)

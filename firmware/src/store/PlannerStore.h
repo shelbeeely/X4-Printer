@@ -1,0 +1,179 @@
+#pragma once
+// On-device planner task index -- the user-authored half of the Timeline
+// screen's data (the other half is the existing calendar::CalendarSync
+// "next event" cache; PlannerUI merges both, see ui/PlannerUI.h).
+//
+// Split the same way as JobStore.h: TaskIndex here is freestanding
+// (fixed-capacity arrays, no heap allocation, no Arduino/FreeInk
+// dependency) so it's host-unit-testable (firmware/test/planner_store/).
+// The Arduino-dependent half -- PlannerStore.cpp -- owns loading/saving
+// this state as JSON on the SD card via FreeInk's SDCardManager, following
+// the same atomic write-then-rename pattern as JobStore.cpp.
+//
+// kMaxPlannerTasks bounds worst-case RAM the same way kMaxInboxJobs does
+// for JobIndex -- see docs/architecture.md "Memory budget".
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
+#include "store/IdTypes.h"
+
+namespace store {
+
+constexpr size_t kMaxPlannerTasks = 64;
+constexpr size_t kTaskTitleLen = 64;
+constexpr size_t kTaskTimeLen = 5;  // "HH:MM"
+
+// Fixed category set for icon+pattern coding (native screens) and color
+// coding (the on-device web UI's planner.html). Order is part of the wire
+// contract other units build against -- do not reorder or renumber.
+enum class Category : uint8_t {
+  Work = 0,
+  Break,
+  Chore,
+  Health,
+  Social,
+  School,
+  Personal,
+  Other,
+};
+
+inline const char* categoryName(Category c) {
+  switch (c) {
+    case Category::Work:
+      return "work";
+    case Category::Break:
+      return "break";
+    case Category::Chore:
+      return "chore";
+    case Category::Health:
+      return "health";
+    case Category::Social:
+      return "social";
+    case Category::School:
+      return "school";
+    case Category::Personal:
+      return "personal";
+    case Category::Other:
+      return "other";
+  }
+  return "other";
+}
+
+// Inverse of categoryName(). Returns false (out left unchanged) for
+// anything unrecognized, so callers can default to Category::Other
+// explicitly rather than have this function paper over a malformed value.
+inline bool parseCategoryName(const char* s, Category& out) {
+  if (std::strcmp(s, "work") == 0) {
+    out = Category::Work;
+    return true;
+  }
+  if (std::strcmp(s, "break") == 0) {
+    out = Category::Break;
+    return true;
+  }
+  if (std::strcmp(s, "chore") == 0) {
+    out = Category::Chore;
+    return true;
+  }
+  if (std::strcmp(s, "health") == 0) {
+    out = Category::Health;
+    return true;
+  }
+  if (std::strcmp(s, "social") == 0) {
+    out = Category::Social;
+    return true;
+  }
+  if (std::strcmp(s, "school") == 0) {
+    out = Category::School;
+    return true;
+  }
+  if (std::strcmp(s, "personal") == 0) {
+    out = Category::Personal;
+    return true;
+  }
+  if (std::strcmp(s, "other") == 0) {
+    out = Category::Other;
+    return true;
+  }
+  return false;
+}
+
+struct TaskEntry {
+  char id[kTaskIdLen + 1] = {0};
+  char title[kTaskTitleLen + 1] = {0};
+  Category category = Category::Other;
+  char startTime[kTaskTimeLen + 1] = {0};  // "HH:MM", local time
+  char endTime[kTaskTimeLen + 1] = {0};
+  bool done = false;
+
+  bool taskIdEquals(const char* other) const { return std::strncmp(id, other, kTaskIdLen) == 0; }
+};
+
+// Fixed-capacity, allocation-free task index. Every mutating method
+// reports success/failure explicitly rather than asserting/aborting, same
+// contract as JobIndex.
+class TaskIndex {
+ public:
+  size_t count() const { return count_; }
+  size_t capacity() const { return kMaxPlannerTasks; }
+  bool full() const { return count_ >= kMaxPlannerTasks; }
+
+  const TaskEntry* find(const char* id) const {
+    for (size_t i = 0; i < count_; i++) {
+      if (entries_[i].taskIdEquals(id)) return &entries_[i];
+    }
+    return nullptr;
+  }
+  TaskEntry* find(const char* id) {
+    return const_cast<TaskEntry*>(static_cast<const TaskIndex*>(this)->find(id));
+  }
+
+  // Inserts a new entry, or overwrites an existing one with the same id
+  // (re-sync from the Pi). Returns false only when the index is full AND
+  // id is not already present.
+  bool upsert(const TaskEntry& entry) {
+    if (TaskEntry* existing = find(entry.id)) {
+      *existing = entry;
+      return true;
+    }
+    if (full()) return false;
+    entries_[count_++] = entry;
+    return true;
+  }
+
+  bool remove(const char* id) {
+    for (size_t i = 0; i < count_; i++) {
+      if (entries_[i].taskIdEquals(id)) {
+        entries_[i] = entries_[count_ - 1];
+        count_--;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool setDone(const char* id, bool done) {
+    if (TaskEntry* e = find(id)) {
+      e->done = done;
+      return true;
+    }
+    return false;
+  }
+
+  const TaskEntry& at(size_t i) const { return entries_[i]; }
+
+  void clear() { count_ = 0; }
+
+ private:
+  TaskEntry entries_[kMaxPlannerTasks];
+  size_t count_ = 0;
+};
+
+// SD persistence (PlannerStore.cpp -- Arduino/FreeInk dependent, not part
+// of the host-testable surface above). Path: /planner/index.json.
+bool loadPlannerIndex(TaskIndex& index);
+bool savePlannerIndex(const TaskIndex& index);
+
+}  // namespace store
