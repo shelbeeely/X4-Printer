@@ -7,6 +7,7 @@ import urllib.request
 
 import pytest
 
+from focusink_server import planner
 from focusink_server.admin_api import AdminApiServer
 from focusink_server.config import Config
 from focusink_server.db import Database
@@ -538,3 +539,108 @@ def test_delete_wifi_network(running_admin_api):
     _post(f"{base}/wifi-networks/{added['id']}/delete", {})
     listed = json.loads(_get(f"{base}/wifi-networks").read())
     assert listed["wifi_networks"] == []
+
+
+# -- planner tasks + Pomodoro config (per-device) ----------------------------
+
+
+def test_list_planner_tasks_requires_date(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks")
+    assert exc.value.code == 400
+
+
+def test_add_and_list_planner_task(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    assert "id" in added
+
+    listed = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert len(listed["tasks"]) == 1
+    assert listed["tasks"][0]["title"] == "Standup"
+    assert listed["categories"] == list(planner.CATEGORIES)
+
+
+def test_add_planner_task_rejects_null_title(running_admin_api):
+    """A JSON null title must 400, not silently become a task literally
+    titled the string "None" (str(None))."""
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": None, "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        )
+    assert exc.value.code == 400
+
+
+def test_add_planner_task_rejects_unknown_category(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "X", "category": "Not-A-Category", "start_time": "09:00", "end_time": "09:15"},
+        )
+    assert exc.value.code == 400
+
+
+def test_delete_planner_task(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    _post(f"{base}/devices/{DEVICE_ID}/planner/tasks/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert listed["tasks"] == []
+
+
+def test_delete_planner_task_scoped_to_device(running_admin_api):
+    """A task belonging to a different device_id must 404, not delete --
+    same scoping guarantee sync_api.py's device-facing complete endpoint
+    enforces (docs/protocol.md §1.8)."""
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/devices/dev-other/planner/tasks/{added['id']}/delete", {})
+    assert exc.value.code == 404
+
+
+def test_pomodoro_config_defaults_and_round_trips(running_admin_api):
+    base, _db, _config = running_admin_api
+    defaults = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert defaults == {
+        "work_minutes": 25,
+        "break_minutes": 5,
+        "long_break_minutes": 15,
+        "sessions_before_long_break": 4,
+        "checkpoint_minutes": 5,
+    }
+
+    updated = json.loads(_post(f"{base}/devices/{DEVICE_ID}/pomodoro/config", {"work_minutes": 30}).read())
+    assert updated["work_minutes"] == 30
+    assert updated["break_minutes"] == 5  # unset fields merge onto the previous config, not the defaults
+
+    refetched = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert refetched["work_minutes"] == 30
+
+
+def test_set_pomodoro_config_rejects_unknown_field(running_admin_api):
+    """An unrecognized field name must 400, not be silently dropped while
+    returning 200 with the config unchanged."""
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/devices/{DEVICE_ID}/pomodoro/config", {"checkpoint_min": 10})
+    assert exc.value.code == 400

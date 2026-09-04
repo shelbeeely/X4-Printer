@@ -40,8 +40,9 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
+from . import planner
 from .config import Config, RUNTIME_OVERRIDABLE_FIELDS, save_runtime_overrides
 from .db import Database
 from .printer_forward import apply_approval
@@ -215,6 +216,10 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_list_calendars()
         elif rest == ["wifi-networks"]:
             self._handle_list_wifi_networks()
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "planner" and rest[3] == "tasks":
+            self._handle_list_planner_tasks(rest[1], parsed.query)
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "pomodoro" and rest[3] == "config":
+            self._handle_get_pomodoro_config(rest[1])
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -244,6 +249,18 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             self._handle_add_wifi_network()
         elif len(rest) == 3 and rest[0] == "wifi-networks" and rest[2] == "delete":
             self._handle_delete_wifi_network(rest[1])
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "planner" and rest[3] == "tasks":
+            self._handle_add_planner_task(rest[1])
+        elif (
+            len(rest) == 6
+            and rest[0] == "devices"
+            and rest[2] == "planner"
+            and rest[3] == "tasks"
+            and rest[5] == "delete"
+        ):
+            self._handle_delete_planner_task(rest[1], rest[4])
+        elif len(rest) == 4 and rest[0] == "devices" and rest[2] == "pomodoro" and rest[3] == "config":
+            self._handle_set_pomodoro_config(rest[1])
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -582,6 +599,80 @@ class AdminApiHandler(BaseHTTPRequestHandler):
             return
         self.db.delete_wifi_network(network_id)
         self._send_json(200, {"status": "deleted"})
+
+    # -- handlers: Planner tasks + Pomodoro config (per-device, synced) --------
+    #
+    # Uses planner.py directly (the same validation/shaping module
+    # sync_api.py's device-facing endpoints use) rather than a parallel
+    # implementation -- see docs/protocol.md §1.8/§1.9 for the wire
+    # contract this mirrors on the admin side. Unlike calendars/Wi-Fi
+    # (household-wide), tasks and Pomodoro config are per-device, so every
+    # route here takes a device_id path segment.
+
+    def _handle_list_planner_tasks(self, device_id: str, query: str) -> None:
+        date = (parse_qs(query).get("date", [""])[0] or "").strip()
+        if not date or not planner.is_valid_date(date):
+            self._send_json(400, {"error": "missing or invalid date (expected YYYY-MM-DD)"})
+            return
+        tasks = planner.list_tasks(self.db, device_id, date)
+        self._send_json(200, {"tasks": tasks, "categories": list(planner.CATEGORIES)})
+
+    def _handle_add_planner_task(self, device_id: str) -> None:
+        body = self._read_json_body()
+        if body is None:
+            self._send_json(400, {"error": "invalid body"})
+            return
+        try:
+            task_id = planner.create_task(
+                self.db,
+                device_id=device_id,
+                # `or ""` (not a bare str()) so a JSON null coerces to an
+                # empty string like a missing field would, instead of
+                # becoming the literal text "None" -- str(None) == "None"
+                # would otherwise pass create_task's non-empty title check.
+                date=str(body.get("date") or ""),
+                title=str(body.get("title") or ""),
+                category=str(body.get("category") or ""),
+                start_time=str(body.get("start_time") or ""),
+                end_time=str(body.get("end_time") or ""),
+            )
+        except planner.PlannerError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {"id": task_id})
+
+    def _handle_delete_planner_task(self, device_id: str, task_id_str: str) -> None:
+        try:
+            task_id = int(task_id_str)
+        except ValueError:
+            self._send_json(400, {"error": "invalid task id"})
+            return
+        task = self.db.get_planner_task(task_id)
+        if task is None or task["device_id"] != device_id:
+            self._send_json(404, {"error": "task not found"})
+            return
+        planner.delete_task(self.db, task_id)
+        self._send_json(200, {"status": "deleted"})
+
+    def _handle_get_pomodoro_config(self, device_id: str) -> None:
+        self._send_json(200, planner.get_pomodoro_config(self.db, device_id))
+
+    def _handle_set_pomodoro_config(self, device_id: str) -> None:
+        body = self._read_json_body()
+        if body is None:
+            self._send_json(400, {"error": "invalid body"})
+            return
+        # Passed through unfiltered (not pre-restricted to known keys) so an
+        # unrecognized field reaches planner.set_pomodoro_config()'s own
+        # "unknown pomodoro config field" validation and surfaces as a 400,
+        # rather than being silently dropped and returning 200 with the
+        # config unchanged.
+        try:
+            merged = planner.set_pomodoro_config(self.db, device_id, **body)
+        except (planner.PlannerError, TypeError, ValueError) as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, merged)
 
 
 class AdminApiServer(ThreadingHTTPServer):

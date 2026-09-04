@@ -71,6 +71,7 @@ const loaders = {
   devices: loadDevices,
   approvals: loadApprovals,
   "device-config": loadDeviceConfig,
+  planner: loadPlanner,
   settings: loadSettings,
 };
 
@@ -352,6 +353,171 @@ async function deleteWifiNetwork(id) {
     showError(err.message);
   }
 }
+
+// -- planner (per-device tasks + Pomodoro config) ---------------------------
+
+// Fixed set, same order as firmware's store::Category and pi-server's
+// planner.CATEGORIES -- see docs/planner.md. Hardcoded here (not fetched)
+// since it's needed to populate the category <select> before any device/
+// date is even chosen.
+const PLANNER_CATEGORIES = ["Work", "Break", "Chore", "Health", "Social", "School", "Personal", "Other"];
+const POMODORO_FIELDS = [
+  "work_minutes",
+  "break_minutes",
+  "long_break_minutes",
+  "sessions_before_long_break",
+  "checkpoint_minutes",
+];
+
+function todayDateString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function loadPlanner() {
+  const categorySelect = document.getElementById("task-category");
+  if (categorySelect.options.length === 0) {
+    for (const cat of PLANNER_CATEGORIES) {
+      categorySelect.appendChild(el("option", { value: cat, text: cat }));
+    }
+  }
+
+  const dateInput = document.getElementById("planner-date");
+  if (!dateInput.value) dateInput.value = todayDateString();
+
+  // Refetched every time this tab is activated (not cached) -- a device
+  // paired after the Planner tab's first visit must show up without
+  // requiring a full page reload.
+  const deviceSelect = document.getElementById("planner-device");
+  const previouslySelected = deviceSelect.value;
+  const { devices } = await api("/devices");
+  deviceSelect.replaceChildren();
+  if (devices.length === 0) {
+    deviceSelect.appendChild(el("option", { value: "", text: "No paired devices" }));
+  }
+  for (const device of devices) {
+    deviceSelect.appendChild(el("option", { value: device.device_id, text: device.name || device.device_id }));
+  }
+  if (devices.some((d) => d.device_id === previouslySelected)) {
+    deviceSelect.value = previouslySelected;
+  }
+
+  if (!deviceSelect.value) return;  // no device paired yet -- nothing to load
+  await Promise.all([loadPlannerTasks(), loadPomodoroConfig()]);
+}
+
+function selectedPlannerDevice() {
+  return document.getElementById("planner-device").value;
+}
+
+async function loadPlannerTasks() {
+  const deviceId = selectedPlannerDevice();
+  const date = document.getElementById("planner-date").value;
+  if (!deviceId || !date) return;
+  const { tasks } = await api(
+    `/devices/${encodeURIComponent(deviceId)}/planner/tasks?date=${encodeURIComponent(date)}`,
+  );
+  const tbody = document.querySelector("#planner-tasks-table tbody");
+  tbody.replaceChildren();
+  if (tasks.length === 0) {
+    tbody.appendChild(el("tr", {}, [el("td", { class: "empty", colspan: "6", text: "No tasks for this day." })]));
+    return;
+  }
+  for (const task of tasks) {
+    tbody.appendChild(
+      el("tr", {}, [
+        el("td", { text: task.title }),
+        el("td", { text: task.category }),
+        el("td", { text: task.start_time }),
+        el("td", { text: task.end_time }),
+        el("td", { text: task.done ? "yes" : "no" }),
+        el("td", {}, [
+          el("button", {
+            class: "btn btn-danger",
+            text: "Remove",
+            onclick: () => deletePlannerTask(task.id),
+          }),
+        ]),
+      ]),
+    );
+  }
+}
+
+document.getElementById("planner-device").addEventListener("change", () => {
+  loadPlannerTasks().catch((err) => showError(err.message));
+  loadPomodoroConfig().catch((err) => showError(err.message));
+});
+document.getElementById("planner-date").addEventListener("change", () => {
+  loadPlannerTasks().catch((err) => showError(err.message));
+});
+
+document.getElementById("planner-task-form").addEventListener("submit", async (evt) => {
+  evt.preventDefault();
+  const deviceId = selectedPlannerDevice();
+  if (!deviceId) {
+    showError("No device selected.");
+    return;
+  }
+  const payload = {
+    date: document.getElementById("planner-date").value,
+    title: document.getElementById("task-title").value.trim(),
+    category: document.getElementById("task-category").value,
+    start_time: document.getElementById("task-start").value,
+    end_time: document.getElementById("task-end").value,
+  };
+  try {
+    await api(`/devices/${encodeURIComponent(deviceId)}/planner/tasks`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    evt.target.reset();
+    await loadPlannerTasks();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+async function deletePlannerTask(taskId) {
+  const deviceId = selectedPlannerDevice();
+  try {
+    await api(`/devices/${encodeURIComponent(deviceId)}/planner/tasks/${taskId}/delete`, { method: "POST" });
+    await loadPlannerTasks();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function loadPomodoroConfig() {
+  const deviceId = selectedPlannerDevice();
+  if (!deviceId) return;
+  const config = await api(`/devices/${encodeURIComponent(deviceId)}/pomodoro/config`);
+  for (const field of POMODORO_FIELDS) {
+    document.getElementById(`pomo-${field}`).value = config[field];
+  }
+  document.getElementById("pomodoro-saved").hidden = true;
+}
+
+document.getElementById("pomodoro-form").addEventListener("submit", async (evt) => {
+  evt.preventDefault();
+  const deviceId = selectedPlannerDevice();
+  if (!deviceId) {
+    showError("No device selected.");
+    return;
+  }
+  const payload = {};
+  for (const field of POMODORO_FIELDS) {
+    payload[field] = Number(document.getElementById(`pomo-${field}`).value);
+  }
+  try {
+    await api(`/devices/${encodeURIComponent(deviceId)}/pomodoro/config`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    document.getElementById("pomodoro-saved").hidden = false;
+  } catch (err) {
+    showError(err.message);
+  }
+});
 
 // -- settings ---------------------------------------------------------------
 
