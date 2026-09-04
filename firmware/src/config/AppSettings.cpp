@@ -26,6 +26,7 @@ void AppSettings::load() {
   data_.calendarWakeBeforeStart = doc["calendar_wake_before_start"] | false;
   data_.calendarWakeLeadMinutes = doc["calendar_wake_lead_minutes"] | 10;
   data_.calendarWakeAtEnd = doc["calendar_wake_at_end"] | false;
+  data_.plannerHorizontalView = doc["planner_horizontal_view"] | false;
 }
 
 bool AppSettings::save() const {
@@ -34,6 +35,7 @@ bool AppSettings::save() const {
   doc["calendar_wake_before_start"] = data_.calendarWakeBeforeStart;
   doc["calendar_wake_lead_minutes"] = data_.calendarWakeLeadMinutes;
   doc["calendar_wake_at_end"] = data_.calendarWakeAtEnd;
+  doc["planner_horizontal_view"] = data_.plannerHorizontalView;
 
   String out;
   serializeJson(doc, out);

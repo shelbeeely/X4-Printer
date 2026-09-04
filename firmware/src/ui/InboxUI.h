@@ -28,6 +28,7 @@
 #include "config/DeviceConfig.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
+#include "store/PlannerStore.h"
 #include "sync/SyncManager.h"
 #include "ui/WebUiServer.h"
 #include "xtc/XtcReader.h"
@@ -48,6 +49,8 @@ enum class ScreenMode {
   WebUiChoice,  // "Use Wi-Fi" / "Use Hotspot" / "Cancel" — entry point for the on-device web UI
   WebUi,        // web UI is running: shows connection info + PIN + Stop
   Settings,     // tabbed settings — see SettingsTab
+  Timeline,     // day view merging store::PlannerStore tasks + the calendar
+                // module's next event — see ui/PlannerUI.h, docs/planner.md
   // Rendered exactly once on a Timer wake that lands within a configured
   // calendar-reminder window (Settings > Calendar tab; see
   // calendar/WakeSchedule.h), then main.cpp sleeps immediately — nobody is
@@ -80,12 +83,20 @@ enum class SettingsTab : uint8_t {
   Calendar = 3,   // wake-before-event / wake-at-event-end reminders -- see
                   // calendar/WakeSchedule.h
   DeviceInfo = 4,  // firmware version, battery, storage, uptime -- read-only
-  kCount = 5,
+  Planner = 5,     // Timeline orientation (vertical/horizontal) -- see
+                    // ui/PlannerUI.h. Appended after DeviceInfo rather than
+                    // inserted earlier, so existing tab positions/muscle
+                    // memory don't shift.
+  kCount = 6,
 };
 
 struct InboxUiState {
   store::JobIndex* jobs = nullptr;
   store::ApprovalOutboxIndex* outbox = nullptr;
+  // Timeline screen's user-authored tasks (ui/PlannerUI.h,
+  // docs/planner.md) -- loaded/saved by main.cpp the same way jobs/outbox
+  // are. Merged with nextEvent below at render time, not stored merged.
+  store::TaskIndex* plannerTasks = nullptr;
   const config::DeviceConfigData* deviceConfig = nullptr;
   // Not const: the Settings screen's Display tab writes through this
   // (config::AppSettings::instance().data(), wired by main.cpp) and saves

@@ -32,6 +32,14 @@ struct AppSettingsData {
   bool calendarWakeBeforeStart = false;
   uint16_t calendarWakeLeadMinutes = 10;
   bool calendarWakeAtEnd = false;
+
+  // Timeline screen orientation (ui/PlannerUI.h, docs/planner.md) -- same
+  // per-view-toggle-not-firmware-rotation shape as defaultLandscapeView
+  // above, following that field's "Landscape-strip reading mode"
+  // precedent. false = vertical (default): a day-planner ruler,
+  // top-to-bottom. true = horizontal: a single left-to-right strip using
+  // the panel's full width as the timeline's length.
+  bool plannerHorizontalView = false;
 };
 
 class AppSettings {
@@ -50,6 +58,7 @@ class AppSettings {
   void setCalendarWakeBeforeStart(bool value) { data_.calendarWakeBeforeStart = value; }
   void setCalendarWakeLeadMinutes(uint16_t value) { data_.calendarWakeLeadMinutes = value; }
   void setCalendarWakeAtEnd(bool value) { data_.calendarWakeAtEnd = value; }
+  void setPlannerHorizontalView(bool value) { data_.plannerHorizontalView = value; }
 
  private:
   AppSettingsData data_;

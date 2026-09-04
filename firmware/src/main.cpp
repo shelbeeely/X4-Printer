@@ -53,6 +53,11 @@ ui::App* app = nullptr;
 
 store::JobIndex jobIndex;
 store::ApprovalOutboxIndex outboxIndex;
+// Timeline screen's user-authored tasks (ui/PlannerUI.h, docs/planner.md).
+// Populated by a Pi sync pass in a future unit; loaded/saved here the same
+// way jobIndex/outboxIndex are so the SD-backed store round-trips
+// correctly even before that sync glue exists.
+store::TaskIndex plannerTaskIndex;
 config::DeviceConfigData deviceConfig;
 config::AppSettingsData appSettings;
 config::NextEventInfo nextEvent;
@@ -91,6 +96,7 @@ void goToSleep(uint32_t intervalSeconds) {
   // normally a no-op write, not a load-bearing final flush.
   store::saveJobIndex(jobIndex);
   store::saveApprovalOutbox(outboxIndex);
+  store::savePlannerIndex(plannerTaskIndex);
   power::SleepManager::sleepUntilNextEvent(intervalSeconds);  // noreturn
 }
 
@@ -173,9 +179,11 @@ void setup() {
 
   store::loadJobIndex(jobIndex);
   store::loadApprovalOutbox(outboxIndex);
+  store::loadPlannerIndex(plannerTaskIndex);
 
   uiState.jobs = &jobIndex;
   uiState.outbox = &outboxIndex;
+  uiState.plannerTasks = &plannerTaskIndex;
   uiState.deviceConfig = &deviceConfig;
   uiState.appSettings = &appSettings;
   uiState.nextEvent = &nextEvent;

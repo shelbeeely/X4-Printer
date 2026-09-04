@@ -1,5 +1,7 @@
 #include "ui/InboxUI.h"
 
+#include "ui/PlannerUI.h"
+
 #include <ArduinoJson.h>  // pulled transitively by other headers; kept explicit for clarity
 #include <BatteryMonitor.h>
 #include <SDCardManager.h>
@@ -202,10 +204,11 @@ void homeScreen(App::ScreenType& screen, void* userPtr) {
   const freeink::ui::FooterAction footer[] = {
       {.label = "Open", .action = ActionOpenJob},
       {.label = "Sync Now", .action = ActionSyncNow},
+      {.label = "Timeline", .action = ui::kActionOpenTimeline},
       {.label = "Web UI", .action = ActionOpenWebUiChoice},
       {.label = "Settings", .action = ActionOpenSettings},
   };
-  screen.footer(footer, 4);
+  screen.footer(footer, 5);
 
   if (count == 0) {
     screen.popup(idleScreenMessage(state));
@@ -355,6 +358,8 @@ const char* settingsTabName(SettingsTab tab) {
       return "Calendar";
     case SettingsTab::DeviceInfo:
       return "Device Info";
+    case SettingsTab::Planner:
+      return "Planner";
     default:
       return "";
   }
@@ -496,6 +501,9 @@ void settingsScreen(App::ScreenType& screen, void* userPtr) {
     case SettingsTab::Calendar:
       settingsCalendarTab(screen, state);
       break;
+    case SettingsTab::Planner:
+      ui::settingsPlannerTab(screen, state);
+      break;
     case SettingsTab::DeviceInfo:
     default:
       settingsDeviceInfoTab(screen);
@@ -558,6 +566,9 @@ void screenRouter(App::ScreenType& screen, void* userPtr) {
     case ScreenMode::Settings:
       settingsScreen(screen, userPtr);
       return;
+    case ScreenMode::Timeline:
+      ui::timelineScreen(screen, state);
+      return;
     case ScreenMode::Inbox:
     case ScreenMode::Status:
     default:
@@ -604,6 +615,8 @@ void initApp(App& app, InboxUiState& state) {
   // reference members.
   state.webUiServer.attach(state.jobs, state.outbox, state.deviceConfig, state.panelWidth, state.panelHeight,
                             state.wakeMillis);
+
+  ui::registerTimelineActions(app, state);
 
   app.on(
       ActionOpenJob,

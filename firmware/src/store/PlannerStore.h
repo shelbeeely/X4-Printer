@@ -109,7 +109,14 @@ struct TaskEntry {
   char id[kTaskIdLen + 1] = {0};
   char title[kTaskTitleLen + 1] = {0};
   Category category = Category::Other;
-  char startTime[kTaskTimeLen + 1] = {0};  // "HH:MM", local time
+  // "HH:MM" wall-clock strings, entered as-is on the Pi and rendered as-is
+  // on-device -- no timezone conversion happens anywhere, the same
+  // no-timezone-support limitation ui/InboxUI.cpp's idleScreenMessage()
+  // already documents for calendar event times (this firmware never
+  // configures a timezone/NTP offset). ui/TimelineMerge.h sorts these
+  // against the calendar module's own (UTC) next-event time as plain
+  // strings, with the same caveat -- see that file's header comment.
+  char startTime[kTaskTimeLen + 1] = {0};
   char endTime[kTaskTimeLen + 1] = {0};
   bool done = false;
 

@@ -60,8 +60,8 @@ in the same order.
 
 ## Horizontal and vertical modes
 
-The Timeline screen's orientation toggle (`AppSettings.plannerOrientation`,
-`Vertical` default) follows the same precedent as the existing
+The Timeline screen's orientation toggle (`AppSettingsData.plannerHorizontalView`,
+`false`/Vertical default) follows the same precedent as the existing
 **"Landscape-strip reading mode"** for documents (`docs/architecture.md`):
 a per-view toggle from Settings, not a firmware-level display rotation.
 Vertical stacks the day's items top-to-bottom as a day-planner ruler;
