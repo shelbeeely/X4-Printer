@@ -1,6 +1,7 @@
 #include "ui/InboxUI.h"
 
 #include "ui/PlannerUI.h"
+#include "ui/PomodoroUI.h"
 
 #include <ArduinoJson.h>  // pulled transitively by other headers; kept explicit for clarity
 #include <BatteryMonitor.h>
@@ -360,6 +361,8 @@ const char* settingsTabName(SettingsTab tab) {
       return "Device Info";
     case SettingsTab::Planner:
       return "Planner";
+    case SettingsTab::PomodoroTab:
+      return "Pomodoro";
     default:
       return "";
   }
@@ -504,6 +507,9 @@ void settingsScreen(App::ScreenType& screen, void* userPtr) {
     case SettingsTab::Planner:
       ui::settingsPlannerTab(screen, state);
       break;
+    case SettingsTab::PomodoroTab:
+      ui::settingsPomodoroTab(screen, state);
+      break;
     case SettingsTab::DeviceInfo:
     default:
       settingsDeviceInfoTab(screen);
@@ -569,6 +575,9 @@ void screenRouter(App::ScreenType& screen, void* userPtr) {
     case ScreenMode::Timeline:
       ui::timelineScreen(screen, state);
       return;
+    case ScreenMode::Pomodoro:
+      ui::pomodoroScreen(screen, state);
+      return;
     case ScreenMode::Inbox:
     case ScreenMode::Status:
     default:
@@ -617,6 +626,7 @@ void initApp(App& app, InboxUiState& state) {
                             state.wakeMillis);
 
   ui::registerTimelineActions(app, state);
+  ui::registerPomodoroActions(app, state);
 
   app.on(
       ActionOpenJob,

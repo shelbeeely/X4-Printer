@@ -26,6 +26,7 @@
 #include "config/AppSettings.h"
 #include "config/CalendarCache.h"
 #include "config/DeviceConfig.h"
+#include "pomodoro/PomodoroSession.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
 #include "store/PlannerStore.h"
@@ -51,6 +52,8 @@ enum class ScreenMode {
   Settings,     // tabbed settings — see SettingsTab
   Timeline,     // day view merging store::PlannerStore tasks + the calendar
                 // module's next event — see ui/PlannerUI.h, docs/planner.md
+  Pomodoro,     // pomodoro::PomodoroSession's current phase/remaining time
+                // — see ui/PomodoroUI.h, docs/planner.md
   // Rendered exactly once on a Timer wake that lands within a configured
   // calendar-reminder window (Settings > Calendar tab; see
   // calendar/WakeSchedule.h), then main.cpp sleeps immediately — nobody is
@@ -87,7 +90,11 @@ enum class SettingsTab : uint8_t {
                     // ui/PlannerUI.h. Appended after DeviceInfo rather than
                     // inserted earlier, so existing tab positions/muscle
                     // memory don't shift.
-  kCount = 6,
+  PomodoroTab = 6,  // Read-only Pomodoro durations (edit from the Pi admin
+                    // console) -- see ui/PomodoroUI.h. Named PomodoroTab,
+                    // not Pomodoro, to avoid colliding with
+                    // ScreenMode::Pomodoro in this same file.
+  kCount = 7,
 };
 
 struct InboxUiState {
@@ -97,6 +104,9 @@ struct InboxUiState {
   // docs/planner.md) -- loaded/saved by main.cpp the same way jobs/outbox
   // are. Merged with nextEvent below at render time, not stored merged.
   store::TaskIndex* plannerTasks = nullptr;
+  // Pomodoro session state (ui/PomodoroUI.h, docs/planner.md) -- loaded/
+  // saved and advance()'d by main.cpp the same way plannerTasks is.
+  pomodoro::PomodoroSession* pomodoroSession = nullptr;
   const config::DeviceConfigData* deviceConfig = nullptr;
   // Not const: the Settings screen's Display tab writes through this
   // (config::AppSettings::instance().data(), wired by main.cpp) and saves

@@ -12,6 +12,7 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>
+#include <algorithm>
 #include <EInkDisplay.h>
 #include <FreeInkApp.h>
 #include <FreeInkUIDisplayTarget.h>
@@ -25,6 +26,7 @@
 #include "config/CalendarConfig.h"
 #include "config/DeviceConfig.h"
 #include "config/WifiStore.h"
+#include "pomodoro/PomodoroSession.h"
 #include "power/SleepManager.h"
 #include "store/ApprovalOutbox.h"
 #include "store/JobStore.h"
@@ -58,6 +60,11 @@ store::ApprovalOutboxIndex outboxIndex;
 // way jobIndex/outboxIndex are so the SD-backed store round-trips
 // correctly even before that sync glue exists.
 store::TaskIndex plannerTaskIndex;
+// Pomodoro session state (ui/PomodoroUI.h, docs/planner.md) -- loaded/
+// saved the same way, plus advance()'d on every wake (see setup()) so a
+// device that slept through one or more phase boundaries catches up
+// immediately rather than showing a stale phase.
+pomodoro::PomodoroSession pomodoroSession;
 config::DeviceConfigData deviceConfig;
 config::AppSettingsData appSettings;
 config::NextEventInfo nextEvent;
@@ -97,6 +104,7 @@ void goToSleep(uint32_t intervalSeconds) {
   store::saveJobIndex(jobIndex);
   store::saveApprovalOutbox(outboxIndex);
   store::savePlannerIndex(plannerTaskIndex);
+  pomodoro::savePomodoroSession(pomodoroSession);
   power::SleepManager::sleepUntilNextEvent(intervalSeconds);  // noreturn
 }
 
@@ -114,7 +122,16 @@ uint32_t nextWakeIntervalSeconds() {
   config::NextEventInfo scratch = nextEvent;
   calendar::WakeDecision decision =
       calendar::computeWakeDecision(appSettings, scratch, time(nullptr), kWakeTimerIntervalSeconds);
-  return decision.sleepSeconds;
+  uint32_t sleepSeconds = decision.sleepSeconds;
+
+  // An active Pomodoro session's next checkpoint (docs/planner.md) joins
+  // this same decision, exactly like the calendar-driven near-wake above
+  // -- one wake-timer decision point, not two independent timers. See
+  // pomodoro/PomodoroSession.h's secondsUntilNextCheckpoint() comment.
+  if (std::optional<uint32_t> pomodoroWake = pomodoroSession.secondsUntilNextCheckpoint(time(nullptr))) {
+    sleepSeconds = std::min(sleepSeconds, *pomodoroWake);
+  }
+  return sleepSeconds;
 }
 
 // Constructs the FreeInkUI App exactly once per boot (the underlying
@@ -180,10 +197,13 @@ void setup() {
   store::loadJobIndex(jobIndex);
   store::loadApprovalOutbox(outboxIndex);
   store::loadPlannerIndex(plannerTaskIndex);
+  pomodoro::loadPomodoroSession(pomodoroSession);
+  pomodoroSession.advance(time(nullptr));  // catch up any phase boundaries slept through
 
   uiState.jobs = &jobIndex;
   uiState.outbox = &outboxIndex;
   uiState.plannerTasks = &plannerTaskIndex;
+  uiState.pomodoroSession = &pomodoroSession;
   uiState.deviceConfig = &deviceConfig;
   uiState.appSettings = &appSettings;
   uiState.nextEvent = &nextEvent;
@@ -197,31 +217,50 @@ void setup() {
     // silently. This is the "use deep sleep aggressively... wake from a
     // timer, synchronize, then return to sleep" path from the task
     // description — UNLESS a calendar wake target (Settings > Calendar
-    // tab) is due, in which case we render exactly one reminder frame
-    // before sleeping again (see calendar/WakeSchedule.h).
+    // tab) is due, or an active Pomodoro session's checkpoint is due (see
+    // pomodoro/PomodoroSession.h), in which case we render exactly one
+    // frame before sleeping again.
     runSyncPass();
 
     calendar::WakeDecision decision =
         calendar::computeWakeDecision(appSettings, nextEvent, time(nullptr), kWakeTimerIntervalSeconds);
-    if (decision.alert == calendar::WakeAlertKind::None) {
-      goToSleep(decision.sleepSeconds);  // noreturn
+    bool pomodoroCheckpointDue =
+        pomodoroSession.isActive() && pomodoroSession.secondsUntilNextCheckpoint(time(nullptr)) == 0;
+
+    if (decision.alert == calendar::WakeAlertKind::None && !pomodoroCheckpointDue) {
+      // nextWakeIntervalSeconds(), not decision.sleepSeconds directly --
+      // that field alone is calendar-only and would silently drop any
+      // still-pending Pomodoro checkpoint from this sleep's duration.
+      goToSleep(nextWakeIntervalSeconds());  // noreturn
     }
 
-    // A reminder is due: computeWakeDecision() already stamped the fired
-    // dedup marker into `nextEvent` above — persist it right away so a
-    // crash or power loss between here and the next sync can't re-fire
-    // the same target, then render the one frame and go straight back to
-    // sleep. The e-paper panel holds that image with no power until the
-    // next wake redraws it, so there's nothing to wait on here.
-    config::CalendarCache::instance().set(nextEvent);
-    config::CalendarCache::instance().save();
-
-    uiState.calendarReminderKind = decision.alert == calendar::WakeAlertKind::BeforeStart
-                                        ? ui::CalendarReminderKind::BeforeStart
-                                        : ui::CalendarReminderKind::AtEnd;
-    uiState.mode = ui::ScreenMode::CalendarReminder;
-
     app = &ensureApp();
+
+    if (decision.alert != calendar::WakeAlertKind::None) {
+      // A calendar reminder is due: computeWakeDecision() already stamped
+      // the fired dedup marker into `nextEvent` above — persist it right
+      // away so a crash or power loss between here and the next sync
+      // can't re-fire the same target. If a Pomodoro checkpoint also
+      // happens to be due on this exact wake, the calendar reminder frame
+      // wins (same "only one alert per wake" precedent WakeDecision's own
+      // comment documents) -- no state is lost, the checkpoint simply
+      // redraws on the next wake instead.
+      config::CalendarCache::instance().set(nextEvent);
+      config::CalendarCache::instance().save();
+
+      uiState.calendarReminderKind = decision.alert == calendar::WakeAlertKind::BeforeStart
+                                          ? ui::CalendarReminderKind::BeforeStart
+                                          : ui::CalendarReminderKind::AtEnd;
+      uiState.mode = ui::ScreenMode::CalendarReminder;
+    } else {
+      // pomodoroCheckpointDue: render the Pomodoro screen's current
+      // phase/remaining time so the panel actually reflects it, per
+      // docs/planner.md's checkpoint-wake model -- nothing to persist
+      // first (unlike a calendar alert, a checkpoint redraw doesn't mark
+      // anything as "fired").
+      uiState.mode = ui::ScreenMode::Pomodoro;
+    }
+
     freeink::ui::InputSnapshot noInput{};
     freeink::ui::ActionEvent event = app->render(noInput);
     (void)event;
@@ -243,6 +282,14 @@ void setup() {
 void loop() {
   buttons.update();
   bool anyInput = buttons.wasAnyPressed();
+
+  // Catches a phase transition that becomes due while the user is actively
+  // interacting during this same wake window, not just at the top of
+  // setup() -- cheap no-op when nothing is due yet (see advance()'s own
+  // early-return for now < phaseEnd).
+  if (pomodoroSession.advance(time(nullptr)) && uiState.mode == ui::ScreenMode::Pomodoro) {
+    app->invalidate(freeink::ui::RefreshHint::Full);
+  }
 
   freeink::ui::InputSnapshot input = readInputSnapshot();
   freeink::ui::ActionEvent event = app->render(input);

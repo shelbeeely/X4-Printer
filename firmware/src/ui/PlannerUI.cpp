@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "ui/CategoryStyle.h"
+#include "ui/PomodoroUI.h"
 #include "ui/TimelineMerge.h"
 
 namespace ui {
@@ -132,9 +133,10 @@ void timelineScreen(App::ScreenType& screen, InboxUiState& state) {
 
   const freeink::ui::FooterAction footer[] = {
       {.label = horizontal ? "View: Vert" : "View: Horiz", .action = kActionTimelineToggleView},
+      {.label = "Pomodoro", .action = kActionOpenPomodoro},
       {.label = "Back", .action = kActionTimelineBack},
   };
-  screen.footer(footer, 2);
+  screen.footer(footer, 3);
 }
 
 void registerTimelineActions(App& app, InboxUiState& state) {

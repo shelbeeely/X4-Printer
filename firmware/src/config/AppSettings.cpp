@@ -27,6 +27,11 @@ void AppSettings::load() {
   data_.calendarWakeLeadMinutes = doc["calendar_wake_lead_minutes"] | 10;
   data_.calendarWakeAtEnd = doc["calendar_wake_at_end"] | false;
   data_.plannerHorizontalView = doc["planner_horizontal_view"] | false;
+  data_.pomodoroWorkMinutes = doc["pomodoro_work_minutes"] | 25;
+  data_.pomodoroBreakMinutes = doc["pomodoro_break_minutes"] | 5;
+  data_.pomodoroLongBreakMinutes = doc["pomodoro_long_break_minutes"] | 15;
+  data_.pomodoroSessionsBeforeLongBreak = doc["pomodoro_sessions_before_long_break"] | 4;
+  data_.pomodoroCheckpointMinutes = doc["pomodoro_checkpoint_minutes"] | 5;
 }
 
 bool AppSettings::save() const {
@@ -36,6 +41,11 @@ bool AppSettings::save() const {
   doc["calendar_wake_lead_minutes"] = data_.calendarWakeLeadMinutes;
   doc["calendar_wake_at_end"] = data_.calendarWakeAtEnd;
   doc["planner_horizontal_view"] = data_.plannerHorizontalView;
+  doc["pomodoro_work_minutes"] = data_.pomodoroWorkMinutes;
+  doc["pomodoro_break_minutes"] = data_.pomodoroBreakMinutes;
+  doc["pomodoro_long_break_minutes"] = data_.pomodoroLongBreakMinutes;
+  doc["pomodoro_sessions_before_long_break"] = data_.pomodoroSessionsBeforeLongBreak;
+  doc["pomodoro_checkpoint_minutes"] = data_.pomodoroCheckpointMinutes;
 
   String out;
   serializeJson(doc, out);

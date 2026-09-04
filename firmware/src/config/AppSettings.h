@@ -40,6 +40,17 @@ struct AppSettingsData {
   // top-to-bottom. true = horizontal: a single left-to-right strip using
   // the panel's full width as the timeline's length.
   bool plannerHorizontalView = false;
+
+  // Pomodoro defaults (ui/PomodoroUI.h, docs/planner.md, docs/protocol.md
+  // §1.9) -- classic Pomodoro technique numbers. Settings > Pomodoro shows
+  // these read-only (same pattern as the Sync & Relay tab): editing them
+  // is meant to happen from the Pi admin console, not on a device with no
+  // keyboard/dial for typing five numbers.
+  uint16_t pomodoroWorkMinutes = 25;
+  uint16_t pomodoroBreakMinutes = 5;
+  uint16_t pomodoroLongBreakMinutes = 15;
+  uint16_t pomodoroSessionsBeforeLongBreak = 4;
+  uint16_t pomodoroCheckpointMinutes = 5;
 };
 
 class AppSettings {
