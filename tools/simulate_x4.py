@@ -135,6 +135,28 @@ class X4Client:
         with self._request("POST", f"{self.base_url}/approvals", body=body) as resp:
             return json.loads(resp.read())
 
+    def list_planner_tasks(self, date: str) -> list[dict]:
+        """docs/protocol.md §1.8 -- one day's tasks, authored on the Pi
+        (admin console) and pulled down the same wake window as jobs."""
+        date_qs = urllib.parse.urlencode({"date": date})
+        with self._request("GET", f"{self.base_url}/devices/{self.device_id}/planner/tasks?{date_qs}") as resp:
+            return json.loads(resp.read())["tasks"]
+
+    def complete_planner_task(self, task_id: int | str, completion_id: Optional[str] = None) -> dict:
+        """docs/protocol.md §1.8 -- idempotent completion sync-back, same
+        client-generated-idempotency-key shape submit_approval() already
+        uses for approval_id."""
+        completion_id = completion_id or uuid.uuid4().hex
+        url = f"{self.base_url}/devices/{self.device_id}/planner/tasks/{task_id}/complete"
+        with self._request("POST", url, body={"completion_id": completion_id}) as resp:
+            return json.loads(resp.read())
+
+    def get_pomodoro_config(self) -> dict:
+        """docs/protocol.md §1.9 -- per-device Pomodoro durations, defaulting
+        to 25/5/15/4/5 when this device has never had its own config set."""
+        with self._request("GET", f"{self.base_url}/devices/{self.device_id}/pomodoro/config") as resp:
+            return json.loads(resp.read())
+
     def upload_original(self, job_id: str, data: bytes, mime: str, title: str) -> dict:
         """docs/protocol.md §1.7: the direct-upload endpoint behind the
         on-device web UI's "Upload" button
@@ -202,6 +224,20 @@ def _cmd_approve(client: X4Client, args: argparse.Namespace) -> None:
     print(client.submit_approval(args.job_id, args.action))
 
 
+def _cmd_planner_tasks(client: X4Client, args: argparse.Namespace) -> None:
+    for task in client.list_planner_tasks(args.date):
+        done = "x" if task["done"] else " "
+        print(f"[{done}] {task['start_time']}-{task['end_time']}  {task['category']:10s} {task['title']}")
+
+
+def _cmd_planner_complete(client: X4Client, args: argparse.Namespace) -> None:
+    print(client.complete_planner_task(args.task_id))
+
+
+def _cmd_pomodoro_config(client: X4Client, args: argparse.Namespace) -> None:
+    print(client.get_pomodoro_config())
+
+
 def _cmd_upload(client: X4Client, args: argparse.Namespace) -> None:
     job_id = args.job_id or uuid.uuid4().hex
     data = Path(args.file).read_bytes()
@@ -241,6 +277,11 @@ def main() -> int:
     p_upload.add_argument("--job-id", help="defaults to a fresh uuid4 hex, like a real device would generate")
     p_upload.add_argument("--mime", default="image/jpeg", choices=["image/jpeg", "image/png"])
     p_upload.add_argument("--title", default="Untitled")
+    p_planner_tasks = sub.add_parser("planner-tasks", help="docs/protocol.md §1.8")
+    p_planner_tasks.add_argument("date", help="YYYY-MM-DD")
+    p_planner_complete = sub.add_parser("planner-complete", help="docs/protocol.md §1.8")
+    p_planner_complete.add_argument("task_id")
+    sub.add_parser("pomodoro-config", help="docs/protocol.md §1.9")
 
     args = parser.parse_args()
 
@@ -263,6 +304,9 @@ def main() -> int:
         "approve": _cmd_approve,
         "sync": _cmd_sync,
         "upload": _cmd_upload,
+        "planner-tasks": _cmd_planner_tasks,
+        "planner-complete": _cmd_planner_complete,
+        "pomodoro-config": _cmd_pomodoro_config,
     }[args.command](client, args)
     return 0
 
