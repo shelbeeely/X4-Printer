@@ -1,0 +1,144 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Focusink</title>
+<script>(function(){try{var t=localStorage.getItem('x4-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap" onerror="this.remove()">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito+Sans:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;
+  --accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--accent2:#bd361e;--sage:#6b7048;
+  --teal:#2f7267;--plum:#7a4a6b;--clay:#a8652f;--slate:#55606b;
+  --danger:#bd361e;--danger-bg:#f6ded6;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;
+    --accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--accent2:#bd361e;--sage:#8f9463;
+    --teal:#4a9a8a;--plum:#b57a9e;--clay:#c98a52;--slate:#8b96a1;
+    --danger:#ff6a47;--danger-bg:#3a1810;
+  }
+}
+html[data-theme="dark"]{--bg:#1c1109;--card-bg:#3a2314;--border:#5c3a1f;--fg:#f3e3c4;--muted:#b89878;--accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--accent2:#bd361e;--sage:#8f9463;--teal:#4a9a8a;--plum:#b57a9e;--clay:#c98a52;--slate:#8b96a1;--danger:#ff6a47;--danger-bg:#3a1810}
+html[data-theme="light"]{--bg:#f7ecd1;--card-bg:#fdf6e3;--border:#e0c99a;--fg:#3a2115;--muted:#8a6f4e;--accent:#e17a25;--accent-fg:#2a1608;--gold:#e19d25;--accent2:#bd361e;--sage:#6b7048;--teal:#2f7267;--plum:#7a4a6b;--clay:#a8652f;--slate:#55606b;--danger:#bd361e;--danger-bg:#f6ded6}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes waveScroll{from{background-position-x:0}to{background-position-x:40px}}
+body{font-family:"Nunito Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";max-width:480px;margin:1rem auto;padding:0 1rem;background:var(--bg);color:var(--fg)}
+header{padding-bottom:1rem;margin-bottom:1.25rem;position:relative}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:24px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='10' viewBox='0 0 40 10'%3E%3Cpath d='M0 5 Q10 0 20 5 T40 5 V10 H0 Z' fill='%23e19d25'/%3E%3Cpath d='M0 6 Q10 1 20 6 T40 6 V10 H0 Z' fill='%23bd361e' opacity='.55'/%3E%3C/svg%3E");background-repeat:repeat-x;background-size:40px 100%;animation:waveScroll 4s linear infinite}
+.header-row{display:flex;align-items:center;gap:.6rem}
+.header-row h1{flex:1;margin:0;font-family:"Boogaloo","Nunito Sans",sans-serif;font-weight:400;font-size:1.6rem;letter-spacing:.01em}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#theme-toggle,#jobs-link{padding:.3rem .7rem;font-size:.78rem;border-radius:999px;font-weight:600;background:var(--card-bg);border:1px solid var(--border);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-block}
+#status{color:var(--muted);font-size:.85rem}
+.item{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:.6rem .75rem;margin:.5rem 0;box-shadow:0 1px 2px rgba(58,33,21,.08);animation:fadeInUp .35s ease-out both;display:flex;align-items:center;gap:.6rem}
+.item .swatch{width:10px;align-self:stretch;border-radius:6px;flex-shrink:0}
+.item .body{flex:1;min-width:0}
+.item h3{margin:0 0 .2rem;font-size:.95rem}
+.item .meta{margin:0;font-size:.78rem;color:var(--muted)}
+.item.done h3{text-decoration:line-through;opacity:.6}
+.item .category-chip{font-size:.7rem;font-weight:700;padding:.1rem .5rem;border-radius:999px;border:1px solid var(--border);color:var(--fg);white-space:nowrap}
+</style></head><body>
+<header>
+  <div class="header-row">
+    <h1>Planner</h1>
+    <a id="jobs-link" href="/">Jobs</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle color theme">Auto</button>
+  </div>
+</header>
+<p id="status" aria-live="polite" aria-atomic="true">Loading...</p>
+<div id="items"></div>
+<script>
+// ---------------- Theme toggle (same as joblist.html's) ----------------
+function currentThemePref() {
+  try { return localStorage.getItem('x4-theme') || 'system'; } catch (e) { return 'system'; }
+}
+function applyTheme(pref) {
+  if (pref === 'light' || pref === 'dark') {
+    document.documentElement.setAttribute('data-theme', pref);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  document.getElementById('theme-toggle').textContent = pref === 'light' ? 'Light' : pref === 'dark' ? 'Dark' : 'Auto';
+}
+document.getElementById('theme-toggle').onclick = function () {
+  const order = ['system', 'light', 'dark'];
+  const next = order[(order.indexOf(currentThemePref()) + 1) % order.length];
+  try {
+    if (next === 'system') localStorage.removeItem('x4-theme');
+    else localStorage.setItem('x4-theme', next);
+  } catch (e) {}
+  applyTheme(next);
+};
+applyTheme(currentThemePref());
+
+// ---------------- Category -> color token ----------------
+// Same 8 categories as store::Category / planner.CATEGORIES -- keep this
+// list and order in sync with those (docs/planner.md).
+const CATEGORY_TOKENS = {
+  Work: 'accent', Break: 'sage', Chore: 'accent2', Health: 'gold',
+  Social: 'teal', School: 'clay', Personal: 'plum', Other: 'slate',
+};
+
+function tokenFor(category) {
+  return CATEGORY_TOKENS[category] || 'slate';
+}
+
+function renderItems(tasks) {
+  const container = document.getElementById('items');
+  container.innerHTML = '';
+  if (tasks.length === 0) {
+    // No separate empty-state message here: the page's single #status
+    // line (updated by refreshTasks() just before this call) already says
+    // "0 items today" -- a second element wouldn't just be redundant, it
+    // would collide with that element's id.
+    return;
+  }
+  for (const t of tasks) {
+    const div = document.createElement('div');
+    div.className = 'item' + (t.done ? ' done' : '');
+    const swatch = document.createElement('div');
+    swatch.className = 'swatch';
+    swatch.style.background = 'var(--' + tokenFor(t.category) + ')';
+    const body = document.createElement('div');
+    body.className = 'body';
+    const h3 = document.createElement('h3');
+    h3.textContent = t.title;
+    const meta = document.createElement('p');
+    meta.className = 'meta';
+    meta.textContent = t.start_time + '-' + t.end_time;
+    body.appendChild(h3);
+    body.appendChild(meta);
+    const chip = document.createElement('span');
+    chip.className = 'category-chip';
+    chip.style.color = 'var(--' + tokenFor(t.category) + ')';
+    chip.style.borderColor = 'var(--' + tokenFor(t.category) + ')';
+    chip.textContent = t.source === 'calendar' ? 'Calendar' : t.category;
+    div.appendChild(swatch);
+    div.appendChild(body);
+    div.appendChild(chip);
+    container.appendChild(div);
+  }
+}
+
+async function refreshTasks() {
+  // `date` is sent for parity with the Pi's own contract shape
+  // (docs/protocol.md §1.8) -- see WebUiServer.cpp's
+  // handleApiPlannerTasksGet() for why this device-local endpoint doesn't
+  // actually filter by it (there's only ever one day's snapshot on-device).
+  const today = new Date().toISOString().slice(0, 10);
+  const r = await fetch('/api/planner/tasks?date=' + today);
+  if (!r.ok) {
+    document.getElementById('status').textContent = 'Could not load tasks.';
+    return;
+  }
+  const data = await r.json();
+  const tasks = data.tasks || [];
+  document.getElementById('status').textContent = tasks.length + ' item' + (tasks.length === 1 ? '' : 's') + ' today';
+  renderItems(tasks);
+}
+
+refreshTasks();
+</script>
+</body></html>

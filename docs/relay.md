@@ -14,7 +14,7 @@ run (a $5/month VPS, or a free-tier instance, is enough).
   XTC sync" below).
 - The **Pi makes the only outbound connection that matters for delivery**:
   it polls `GET /accounts/{id}/approvals/pending` every
-  `XTEINK_RELAY_POLL_INTERVAL` seconds (default 20s). Nothing is ever
+  `FOCUSINK_RELAY_POLL_INTERVAL` seconds (default 20s). Nothing is ever
   pushed *to* the Pi, and no port is opened on your home router/NAT.
 - The **X4 also only makes outbound connections**: when it's away from home
   and the user approves a document, `POST /accounts/{id}/approvals` queues
@@ -36,19 +36,19 @@ run (a $5/month VPS, or a free-tier instance, is enough).
 ```sh
 cd relay
 sudo ./install/install.sh
-sudo -u xteink-relay /opt/xteink-relay/.venv/bin/python \
-  /opt/xteink-relay/tools/create_account.py --name "My Household"
+sudo -u focusink-relay /opt/focusink-relay/.venv/bin/python \
+  /opt/focusink-relay/tools/create_account.py --name "My Household"
 ```
 
 This prints an `account_id` and `account_token`. Put both, plus the relay's
-URL, into the Pi's systemd unit (`pi-server/install/xteink-print-server.service`,
-or `sudo systemctl edit xteink-print-server.service`):
+URL, into the Pi's systemd unit (`pi-server/install/focusink-server.service`,
+or `sudo systemctl edit focusink-server.service`):
 
 ```
 [Service]
-Environment=XTEINK_RELAY_URL=https://relay.example.com:8843
-Environment=XTEINK_RELAY_ACCOUNT_ID=acct-...
-Environment=XTEINK_RELAY_ACCOUNT_TOKEN=...
+Environment=FOCUSINK_RELAY_URL=https://relay.example.com:8843
+Environment=FOCUSINK_RELAY_ACCOUNT_ID=acct-...
+Environment=FOCUSINK_RELAY_ACCOUNT_TOKEN=...
 ```
 
 Then re-run `pair_device.py` for each X4 (or re-copy an updated
@@ -58,7 +58,7 @@ are already set on the Pi at pairing time).
 ## Deployment options / TLS
 
 The relay process can terminate TLS itself
-(`XTEINK_RELAY_TLS_CERT`/`XTEINK_RELAY_TLS_KEY`, e.g. from `certbot`), or —
+(`FOCUSINK_RELAY_TLS_CERT`/`FOCUSINK_RELAY_TLS_KEY`, e.g. from `certbot`), or —
 recommended — sit behind a standard reverse proxy (nginx, Caddy, or your
 VPS provider's load balancer) that terminates TLS on 443 and forwards
 plaintext to `127.0.0.1:8843`. Either way, **never** run the relay's own
@@ -87,7 +87,7 @@ decision — it means print-inbox content leaves your LAN — so it is gated
 behind an explicit opt-in:
 
 ```
-Environment=XTEINK_RELAY_ALLOW_DOCUMENT_SYNC=true
+Environment=FOCUSINK_RELAY_ALLOW_DOCUMENT_SYNC=true
 ```
 
 This prototype does not implement the proxy endpoints for that path (the

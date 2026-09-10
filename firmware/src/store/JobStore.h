@@ -24,7 +24,9 @@ namespace store {
 
 constexpr size_t kMaxInboxJobs = 64;
 constexpr size_t kTitleLen = 64;   // display title, truncated
-constexpr size_t kPathLen = 48;    // "/inbox/<32 hex>.xtc" fits comfortably
+constexpr size_t kPathLen = 48;    // "/inbox/<32 hex>.xtc" fits comfortably; the
+                                    // landscape variant's "/inbox/<32 hex>_l.xtc"
+                                    // (45 chars) still fits within this same length
 constexpr size_t kSha256Len = 64;  // hex-encoded sha256
 
 enum class JobStatus : uint8_t {
@@ -43,6 +45,30 @@ struct JobEntry {
   uint16_t pageCount = 0;
   uint32_t createdAt = 0;
   JobStatus status = JobStatus::Downloaded;
+
+  // Landscape-strip rendering (docs/protocol.md §4) -- a second, optional
+  // XTC file meant to be read with the device turned 90 degrees. Empty
+  // path means this job has none (converted before this feature existed,
+  // or the Pi's landscape conversion failed for this document's page
+  // shape) -- same "empty means not available" convention xtcPath's
+  // sibling fields already use elsewhere in this codebase (e.g.
+  // thumbnail_path on the Pi side).
+  char landscapeXtcPath[kPathLen + 1] = {0};
+  uint32_t landscapeXtcBytes = 0;
+  char landscapeXtcSha256[kSha256Len + 1] = {0};
+  uint16_t landscapePageCount = 0;
+
+  // Set for a job created locally by the on-device web UI's direct-upload
+  // path (WebUiServer's /api/upload/xtc + /api/upload/original) rather
+  // than downloaded from the Pi. originalPending stays true until
+  // SyncManager::uploadPendingOriginals() successfully hands the original
+  // image bytes at originalPath to the Pi under this same job_id — until
+  // then, drainApprovalOutbox() must not sync any approval for this job,
+  // since the Pi doesn't have anything to print yet.
+  bool originalPending = false;
+  char originalPath[kPathLen + 1] = {0};
+  char originalMime[24] = {0};  // "image/jpeg" | "image/png"
+  uint32_t originalBytes = 0;
 
   bool jobIdEquals(const char* other) const { return std::strncmp(jobId, other, kJobIdLen) == 0; }
 };

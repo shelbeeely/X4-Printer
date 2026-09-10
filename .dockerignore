@@ -1,0 +1,11 @@
+# docker-compose.test.yml builds with context "." (repo root) so
+# docker/*.Dockerfile can COPY from both pi-server/ and relay/ -- keep the
+# build context small by excluding everything those images don't need.
+.git
+firmware/
+site/
+docs/
+*.md
+.venv/
+**/__pycache__/
+**/*.pyc

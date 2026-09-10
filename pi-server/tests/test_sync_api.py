@@ -6,10 +6,11 @@ import urllib.request
 
 import pytest
 
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.sync_api import SyncApiServer
-from xteink_print_server.util import hash_token
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.sync_api import SyncApiServer
+from focusink_server.util import hash_token
+from tests.conftest import make_test_png
 
 
 DEVICE_ID = "dev-test1"
@@ -19,11 +20,11 @@ DEVICE_TOKEN = "supersecrettoken"
 def _insert_job(db: Database, config: Config, title="Doc") -> str:
     xtc_path = config.xtc_dir / "job1.xtc"
     xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
-    from xteink_print_server.util import sha256_file
+    from focusink_server.util import sha256_file
 
     original_path = config.originals_dir / "job1.pdf"
     original_path.write_bytes(b"%PDF-fake-bytes")
-    return db.insert_job(
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original_path),
@@ -34,6 +35,7 @@ def _insert_job(db: Database, config: Config, title="Doc") -> str:
         xtc_sha256=sha256_file(xtc_path),
         page_count=1,
     )
+    return job_id
 
 
 @pytest.fixture
@@ -70,6 +72,16 @@ def _post(url, body, token=DEVICE_TOKEN, device=DEVICE_ID):
     return urllib.request.urlopen(req, timeout=5)
 
 
+def _post_raw(url, data: bytes, content_type: str, token=DEVICE_TOKEN, device=DEVICE_ID):
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}", "X-Device-Id": device, "Content-Type": content_type},
+    )
+    return urllib.request.urlopen(req, timeout=5)
+
+
 def test_missing_auth_is_rejected(running_sync_api):
     base, _db, _cfg = running_sync_api
     req = urllib.request.Request(f"{base}/devices/{DEVICE_ID}/jobs")
@@ -83,6 +95,38 @@ def test_wrong_token_is_rejected(running_sync_api):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _get(f"{base}/devices/{DEVICE_ID}/jobs", token="wrong")
     assert exc.value.code == 401
+
+
+def test_device_config_returns_calendars_and_wifi(running_sync_api):
+    base, db, _config = running_sync_api
+    db.add_calendar_feed("https://example.com/a.ics", "Work")
+    db.add_or_update_wifi_network("HomeWiFi", "hunter2")
+
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/config").read())
+    assert resp["calendars"] == [{"url": "https://example.com/a.ics", "label": "Work"}]
+    assert resp["wifi_networks"] == [{"ssid": "HomeWiFi", "password": "hunter2"}]
+    assert "server_time" in resp
+
+
+def test_device_config_empty_when_unconfigured(running_sync_api):
+    base, _db, _config = running_sync_api
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/config").read())
+    assert resp["calendars"] == []
+    assert resp["wifi_networks"] == []
+
+
+def test_device_config_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/config", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_device_config_rejects_device_id_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/dev-other/config")
+    assert exc.value.code == 403
 
 
 def test_list_pending_jobs(running_sync_api):
@@ -147,6 +191,64 @@ def test_approval_print_is_idempotent_over_http(running_sync_api, fake_lp_binary
     assert len(call_log) == 1
 
 
+# -- POST /devices/{id}/jobs/{job_id}: X4 direct-upload endpoint (docs/protocol.md §1.7) --
+
+UPLOAD_JOB_ID = "x4jobfeedfacefeedfacefeedfacefee"
+
+
+def test_upload_original_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    png = make_test_png()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=Photo", png, "image/png", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_upload_original_rejects_device_id_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    png = make_test_png()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/dev-other/jobs/{UPLOAD_JOB_ID}?title=Photo", png, "image/png")
+    assert exc.value.code == 403
+
+
+def test_upload_original_rejects_unsupported_mime(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=Doc", b"%PDF-fake", "application/pdf")
+    assert exc.value.code == 400
+
+
+def test_upload_original_creates_job_under_device_supplied_id(running_sync_api):
+    base, db, _config = running_sync_api
+    png = make_test_png()
+    resp = json.loads(
+        _post_raw(f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=My+Photo", png, "image/png").read()
+    )
+    assert resp["job_id"] == UPLOAD_JOB_ID
+    assert resp["status"] == "created"
+
+    row = db.get_job(UPLOAD_JOB_ID)
+    assert row is not None
+    assert row["title"] == "My Photo"
+    assert row["source"] == "x4_upload"
+    assert row["status"] == "pending"
+
+
+def test_upload_original_retry_with_same_job_id_is_a_no_op(running_sync_api):
+    base, db, _config = running_sync_api
+    png = make_test_png()
+    url = f"{base}/devices/{DEVICE_ID}/jobs/{UPLOAD_JOB_ID}?title=My+Photo"
+
+    resp1 = json.loads(_post_raw(url, png, "image/png").read())
+    resp2 = json.loads(_post_raw(url, png, "image/png").read())
+
+    assert resp1["status"] == "created"
+    assert resp2["status"] == "already_exists"
+    assert resp1["job_id"] == resp2["job_id"] == UPLOAD_JOB_ID
+    assert len(db.list_all_jobs()) == 1
+
+
 def test_approval_device_mismatch_rejected(running_sync_api):
     base, db, config = running_sync_api
     job_id = _insert_job(db, config)
@@ -160,3 +262,91 @@ def test_approval_device_mismatch_rejected(running_sync_api):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(f"{base}/approvals", body)
     assert exc.value.code == 403
+
+
+# -- Planner tasks + Pomodoro config -----------------------------------------
+
+
+def test_list_planner_tasks_requires_auth(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04", token="wrong")
+    assert exc.value.code == 401
+
+
+def test_list_planner_tasks_rejects_device_mismatch(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/dev-other/planner/tasks?date=2026-09-04")
+    assert exc.value.code == 403
+
+
+def test_list_planner_tasks_400_on_missing_date(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks")
+    assert exc.value.code == 400
+
+
+def test_list_planner_tasks_400_on_malformed_date(running_sync_api):
+    base, _db, _config = running_sync_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=not-a-date")
+    assert exc.value.code == 400
+
+
+def test_list_planner_tasks_returns_seeded_tasks(running_sync_api):
+    base, db, _config = running_sync_api
+    from focusink_server import planner
+
+    planner.create_task(
+        db, device_id=DEVICE_ID, date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert len(resp["tasks"]) == 1
+    assert resp["tasks"][0]["title"] == "Standup"
+    assert resp["tasks"][0]["done"] is False
+    assert "server_time" in resp
+
+
+def test_pomodoro_config_returns_defaults_when_unset(running_sync_api):
+    base, _db, _config = running_sync_api
+    resp = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert resp == {
+        "work_minutes": 25,
+        "break_minutes": 5,
+        "long_break_minutes": 15,
+        "sessions_before_long_break": 4,
+        "checkpoint_minutes": 5,
+    }
+
+
+def test_complete_planner_task_idempotent_over_http(running_sync_api):
+    base, db, _config = running_sync_api
+    from focusink_server import planner
+
+    task_id = planner.create_task(
+        db, device_id=DEVICE_ID, date="2026-09-04", title="Standup", category="Work",
+        start_time="09:00", end_time="09:15",
+    )
+    url = f"{base}/devices/{DEVICE_ID}/planner/tasks/{task_id}/complete"
+
+    resp1 = json.loads(_post(url, {"completion_id": "c1"}).read())
+    assert resp1["status"] == "applied"
+    assert resp1["done"] is True
+
+    resp2 = json.loads(_post(url, {"completion_id": "c1"}).read())
+    assert resp2["status"] == "already_applied"
+    assert resp2["done"] is True
+
+    count = db.query_one("SELECT COUNT(*) AS n FROM task_completions WHERE task_id = ?", (task_id,))
+    assert count["n"] == 1
+
+
+def test_complete_planner_task_not_found(running_sync_api):
+    base, _db, _config = running_sync_api
+    url = f"{base}/devices/{DEVICE_ID}/planner/tasks/999999/complete"
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(url, {"completion_id": "c1"})
+    assert exc.value.code == 404

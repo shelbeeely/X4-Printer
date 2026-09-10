@@ -3,9 +3,11 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <SDCardManager.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <mbedtls/sha256.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -52,7 +54,7 @@ bool configureClientForEndpoint(WiFiClientSecure& client, Endpoint endpoint) {
   // setCACert/setInsecure call uses ESP-IDF's default verification, which
   // requires setCACertBundle() to have real roots; production deployments
   // should provision /system/relay_ca.pem explicitly (pair_device.py does
-  // this automatically when XTEINK_RELAY_URL is configured — see
+  // this automatically when FOCUSINK_RELAY_URL is configured — see
   // docs/relay.md).
   if (!relayCaLoaded) {
     relayCaLoaded = loadCaCert(kRelayCaPath, relayCa);
@@ -66,6 +68,25 @@ bool configureClientForEndpoint(WiFiClientSecure& client, Endpoint endpoint) {
 }
 
 String buildAuthHeader(const char* token) { return String("Bearer ") + token; }
+
+// Percent-encodes a query-string value (RFC 3986 unreserved set passed
+// through unescaped) — no URL-encoding helper existed anywhere in this
+// firmware before uploadOriginal() needed one for its `?title=` param.
+String urlEncode(const char* s) {
+  static const char* hex = "0123456789ABCDEF";
+  String out;
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s); *p != '\0'; p++) {
+    unsigned char c = *p;
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      out += static_cast<char>(c);
+    } else {
+      out += '%';
+      out += hex[(c >> 4) & 0xF];
+      out += hex[c & 0xF];
+    }
+  }
+  return out;
+}
 
 void sha256HexOf(const uint8_t digest[32], char out[65]) {
   static const char* hexDigits = "0123456789abcdef";
@@ -143,13 +164,70 @@ int SyncClient::fetchPendingJobs(JobManifest* out, size_t maxCount) {
     m.xtcBytes = job["xtc_bytes"] | 0;
     std::strncpy(m.xtcSha256, job["xtc_sha256"] | "", sizeof(m.xtcSha256) - 1);
     m.pageCount = job["page_count"] | 0;
+    m.landscapeXtcBytes = job["landscape_xtc_bytes"] | 0;
+    std::strncpy(m.landscapeXtcSha256, job["landscape_xtc_sha256"] | "", sizeof(m.landscapeXtcSha256) - 1);
+    m.landscapePageCount = job["landscape_page_count"] | 0;
     n++;
   }
   return static_cast<int>(n);
 }
 
+bool SyncClient::fetchDeviceConfig(DeviceConfigManifest& out) {
+  if (!piConfigured()) return false;
+
+  WiFiClientSecure client;
+  if (!configureClientForEndpoint(client, Endpoint::Pi)) return false;
+
+  HTTPClient http;
+  http.setConnectTimeout(kHttpTimeoutMs);
+  http.setTimeout(kHttpTimeoutMs);
+
+  String url = String(cfg_.piBaseUrl) + "/devices/" + cfg_.deviceId + "/config";
+  if (!http.begin(client, url)) return false;
+  http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
+  http.addHeader("X-Device-Id", cfg_.deviceId);
+
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, http.getStream());
+  http.end();
+  if (err) return false;
+
+  DeviceConfigManifest parsed;
+
+  JsonArrayConst calendars = doc["calendars"].as<JsonArrayConst>();
+  for (JsonObjectConst cal : calendars) {
+    if (parsed.calendarCount >= config::kMaxCalendars) break;
+    const char* url2 = cal["url"] | "";
+    if (url2[0] == '\0') continue;
+    config::CalendarFeed& feed = parsed.calendars[parsed.calendarCount];
+    std::strncpy(feed.url, url2, sizeof(feed.url) - 1);
+    std::strncpy(feed.label, cal["label"] | "", sizeof(feed.label) - 1);
+    parsed.calendarCount++;
+  }
+
+  JsonArrayConst wifiNetworks = doc["wifi_networks"].as<JsonArrayConst>();
+  for (JsonObjectConst net : wifiNetworks) {
+    if (parsed.wifiCount >= config::kMaxWifiNetworks) break;
+    const char* ssid = net["ssid"] | "";
+    if (ssid[0] == '\0') continue;
+    config::WifiCredential& cred = parsed.wifiNetworks[parsed.wifiCount];
+    std::strncpy(cred.ssid, ssid, sizeof(cred.ssid) - 1);
+    std::strncpy(cred.password, net["password"] | "", sizeof(cred.password) - 1);
+    parsed.wifiCount++;
+  }
+
+  out = parsed;
+  return true;
+}
+
 bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const char* expectedSha256Hex,
-                                  uint32_t expectedBytes) {
+                                  uint32_t expectedBytes, const char* variant) {
   if (!piConfigured()) return false;
 
   WiFiClientSecure client;
@@ -160,6 +238,7 @@ bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const 
   http.setTimeout(kHttpTimeoutMs);
 
   String url = String(cfg_.piBaseUrl) + "/jobs/" + jobId + "/xtc";
+  if (variant != nullptr) url += String("?variant=") + variant;
   if (!http.begin(client, url)) return false;
   http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
   http.addHeader("X-Device-Id", cfg_.deviceId);
@@ -250,7 +329,7 @@ bool SyncClient::downloadJobToSd(const char* jobId, const char* destPath, const 
   return true;
 }
 
-bool SyncClient::ackJob(const char* jobId, const char* sha256Hex) {
+bool SyncClient::ackJob(const char* jobId, const char* sha256Hex, const char* landscapeSha256Hex) {
   if (!piConfigured()) return false;
 
   WiFiClientSecure client;
@@ -268,12 +347,45 @@ bool SyncClient::ackJob(const char* jobId, const char* sha256Hex) {
 
   JsonDocument doc;
   doc["sha256"] = sha256Hex;
+  if (landscapeSha256Hex != nullptr) doc["landscape_sha256"] = landscapeSha256Hex;
   String body;
   serializeJson(doc, body);
 
   int code = http.POST(body);
   http.end();
   return code == 200;
+}
+
+bool SyncClient::uploadOriginal(const char* jobId, const char* path, const char* mime, const char* title,
+                                 uint32_t bytes) {
+  if (!piConfigured()) return false;
+
+  FsFile file = SdMan.open(path, O_RDONLY);
+  if (!file) return false;
+
+  WiFiClientSecure client;
+  if (!configureClientForEndpoint(client, Endpoint::Pi)) {
+    file.close();
+    return false;
+  }
+
+  HTTPClient http;
+  http.setConnectTimeout(kHttpTimeoutMs);
+  http.setTimeout(kHttpTimeoutMs);
+
+  String url = String(cfg_.piBaseUrl) + "/devices/" + cfg_.deviceId + "/jobs/" + jobId + "?title=" + urlEncode(title);
+  if (!http.begin(client, url)) {
+    file.close();
+    return false;
+  }
+  http.addHeader("Authorization", buildAuthHeader(cfg_.deviceToken));
+  http.addHeader("X-Device-Id", cfg_.deviceId);
+  http.addHeader("Content-Type", mime);
+
+  int code = http.sendRequest("POST", &file, bytes);
+  file.close();
+  http.end();
+  return code == 200 || code == 201;
 }
 
 ApprovalSubmitResult SyncClient::submitApproval(const store::ApprovalEntry& entry, Endpoint endpoint) {
@@ -330,6 +442,13 @@ ApprovalSubmitResult SyncClient::submitApproval(const store::ApprovalEntry& entr
     } else if (std::strcmp(status, "already_applied") == 0) {
       result.applied = true;
       result.alreadyApplied = true;
+    } else if (std::strcmp(status, "superseded") == 0) {
+      // A different device's approval already won this job's print outcome
+      // (docs/protocol.md §1.4, printer_forward.claim_job_for_finalization
+      // on the Pi side) -- this job's fate is settled, just not by this
+      // approval, so the outbox should stop retrying it exactly like a
+      // normal "applied" result.
+      result.applied = true;
     }
   }
   http.end();

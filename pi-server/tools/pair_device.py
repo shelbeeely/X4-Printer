@@ -6,7 +6,7 @@ device's SD card at /system/device.json (see docs/setup-x4.md).
 Usage:
     python3 tools/pair_device.py --name "Kitchen X4" --pi-host 192.168.1.42
 
-If XTEINK_RELAY_URL/XTEINK_RELAY_ACCOUNT_ID/XTEINK_RELAY_ACCOUNT_TOKEN are
+If FOCUSINK_RELAY_URL/FOCUSINK_RELAY_ACCOUNT_ID/FOCUSINK_RELAY_ACCOUNT_TOKEN are
 set in the environment (same account used by relay_client.py), the relay
 fields are included in the pairing file too, so the device can reach the
 relay directly when away from home. Omit them to pair a device for
@@ -23,9 +23,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from xteink_print_server.config import load_config  # noqa: E402
-from xteink_print_server.db import Database  # noqa: E402
-from xteink_print_server.util import hash_token, new_token  # noqa: E402
+from focusink_server.config import load_config  # noqa: E402
+from focusink_server.db import Database  # noqa: E402
+from focusink_server.util import hash_token, new_token  # noqa: E402
 
 
 def main() -> int:

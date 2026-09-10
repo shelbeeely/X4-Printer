@@ -20,6 +20,23 @@ JobEntry makeEntry(int n) {
   e.pageCount = 1;
   e.createdAt = 1737590000 + n;
   e.status = JobStatus::Downloaded;
+  // Even n gets a landscape-strip variant (docs/protocol.md §4); odd n
+  // stays empty, exercising the "empty means no variant" convention
+  // JobStore.cpp's load/save shares with the Pi's own xtc_landscape_path.
+  if (n % 2 == 0) {
+    std::snprintf(e.landscapeXtcPath, sizeof(e.landscapeXtcPath), "/inbox/%s_l.xtc", e.jobId);
+    e.landscapeXtcBytes = 2000 + n;
+    std::snprintf(e.landscapeXtcSha256, sizeof(e.landscapeXtcSha256), "landscapesha%d", n);
+    e.landscapePageCount = 2;
+  }
+  // Every third n simulates a locally-uploaded job still awaiting the
+  // original's upload to the Pi (JobStore.h's originalPending fields).
+  if (n % 3 == 0) {
+    e.originalPending = true;
+    std::snprintf(e.originalPath, sizeof(e.originalPath), "/inbox/%s_orig.jpg", e.jobId);
+    std::snprintf(e.originalMime, sizeof(e.originalMime), "image/jpeg");
+    e.originalBytes = 3000 + n;
+  }
   return e;
 }
 
@@ -39,6 +56,38 @@ int main() {
   }
   CHECK(index.count() == kMaxInboxJobs);
   CHECK(index.full());
+
+  // Landscape-strip fields (docs/protocol.md §4) survive upsert/find
+  // unchanged, for both a job that has a variant and one that doesn't.
+  JobEntry expected0 = makeEntry(0);
+  const JobEntry* withLandscape = index.find(expected0.jobId);
+  CHECK(withLandscape != nullptr);
+  CHECK(std::strcmp(withLandscape->landscapeXtcPath, expected0.landscapeXtcPath) == 0);
+  CHECK(withLandscape->landscapeXtcBytes == 2000);
+  CHECK(std::strcmp(withLandscape->landscapeXtcSha256, "landscapesha0") == 0);
+  CHECK(withLandscape->landscapePageCount == 2);
+
+  const JobEntry* withoutLandscape = index.find(makeEntry(1).jobId);
+  CHECK(withoutLandscape != nullptr);
+  CHECK(withoutLandscape->landscapeXtcPath[0] == '\0');
+  CHECK(withoutLandscape->landscapeXtcBytes == 0);
+  CHECK(withoutLandscape->landscapeXtcSha256[0] == '\0');
+  CHECK(withoutLandscape->landscapePageCount == 0);
+
+  // originalPending fields (locally-uploaded jobs awaiting Pi upload)
+  // survive upsert/find unchanged, for both a job that has one pending
+  // and one that doesn't.
+  char expectedOriginalPath[store::kPathLen + 1];
+  std::snprintf(expectedOriginalPath, sizeof(expectedOriginalPath), "/inbox/%s_orig.jpg", expected0.jobId);
+  CHECK(withLandscape->originalPending == true);
+  CHECK(std::strcmp(withLandscape->originalPath, expectedOriginalPath) == 0);
+  CHECK(std::strcmp(withLandscape->originalMime, "image/jpeg") == 0);
+  CHECK(withLandscape->originalBytes == 3000);
+
+  CHECK(withoutLandscape->originalPending == false);
+  CHECK(withoutLandscape->originalPath[0] == '\0');
+  CHECK(withoutLandscape->originalMime[0] == '\0');
+  CHECK(withoutLandscape->originalBytes == 0);
 
   // One more distinct job must be rejected (capacity bound from
   // docs/architecture.md "Memory budget" — never silently grows).

@@ -14,7 +14,7 @@ away from home.
                     │   Windows / macOS / Linux / Android / iOS    │
                     └───────────────────────┬───────────────────────┘
                                              │ IPP / AirPrint / driverless
-                                             │ (mDNS: "Xteink X4._ipp._tcp")
+                                             │ (mDNS: "Focusink._ipp._tcp")
                                              ▼
 ┌───────────────────────────── Raspberry Pi Zero W ─────────────────────────────┐
 │  ipp_server.py  ──▶  convert.py (PyMuPDF+Pillow)  ──▶  xtc_writer.py          │
@@ -48,7 +48,7 @@ away from home.
 | Component | Role | Built on |
 |---|---|---|
 | `pi-server/` | Print server: IPP receiver, PDF→XTC conversion, durable job queue, device sync API, CUPS forwarding, relay polling | Pure-stdlib Python (`http.server`, `sqlite3`, `ssl`) + PyMuPDF + Pillow, IPP wire format modeled on `paperlesspaper/paperlessprinter`'s hand-rolled `BaseHTTPRequestHandler` IPP server |
-| `firmware/` | On-device sync client, offline reader, offline approval capture, deep-sleep scheduler | FreeInk SDK (`EInkDisplay`, `SDCardManager`, `PowerManager`, `InputManager`, `FreeInkUI`/`FreeInkApp`), architecture patterned on `crosspoint-reader` (HAL usage, `PersistableStore`-style atomic JSON persistence, streaming HTTP downloader) |
+| `firmware/` | On-device sync client, offline reader, offline approval capture, deep-sleep scheduler, and a visual planner/Pomodoro timer (`store::PlannerStore`, `pomodoro::PomodoroSession`, `ui::PlannerUI`/`ui::PomodoroUI` — see `docs/planner.md`) | FreeInk SDK (`EInkDisplay`, `SDCardManager`, `PowerManager`, `InputManager`, `FreeInkUI`/`FreeInkApp`), architecture patterned on `crosspoint-reader` (HAL usage, `PersistableStore`-style atomic JSON persistence, streaming HTTP downloader) |
 | `relay/` | Store-and-forward for approval envelopes only, so the X4 can approve prints away from home without exposing the home network | Pure-stdlib Python, same style as `pi-server` |
 
 ## Why these reference projects, and where this project departs from them
@@ -78,7 +78,7 @@ away from home.
   install: its byte-level IPP attribute encoding (`_ipp_attr*` helpers,
   `Get-Printer-Attributes` response shape, chunked-body handling,
   `document-format` sniffing) is reused almost verbatim in
-  `pi-server/xteink_print_server/ipp_server.py`. This project's IPP server
+  `pi-server/focusink_server/ipp_server.py`. This project's IPP server
   is **narrower** than PaperlessPrinter's: PaperlessPrinter renders the
   incoming document straight to display-native PNGs for an e-paper *client
   device to poll over HTTP*; this project instead (a) retains the original
@@ -152,6 +152,17 @@ recording it as applied happen in one SQLite transaction.** Concretely,
 2. `INSERT OR IGNORE INTO approvals (...)` — if a row already existed
    (duplicate), read it back, `COMMIT`, and return its stored result without
    touching CUPS.
+2a. For a device-originated `action=print` (not the admin console, not
+   `keep`/`delete`): atomically claim the job's print outcome
+   (`db.claim_job_for_finalization`, its own serialized transaction — see
+   that method's docstring for why a separate transaction is still
+   race-free here). Claim fails (a *different* approval_id already won —
+   two devices raced) → record `applied=1, detail="superseded"` and stop,
+   without touching CUPS. This is the fix for a gap `approval_id`-only
+   dedup above doesn't cover: two DIFFERENT devices independently
+   approving the same still-undecided job each get their own genuinely-new
+   `approval_id`, so step 2 alone can't catch it. See "Direct upload"
+   above and `docs/protocol.md` §1.4's `superseded` status.
 3. Otherwise perform the side effect (`lp -d <queue> <original_path>` for
    `print`, or a status update for `keep`/`delete`).
 4. `UPDATE approvals SET applied=1, detail=..., cups_job_id=... WHERE approval_id=...`
@@ -163,7 +174,18 @@ print could theoretically occur (the `lp` invocation both submitted the job
 retry after restart resubmits). This is bounded and documented as the one
 place true exactly-once cannot be guaranteed without a two-phase commit with
 CUPS itself (which does not support that) — everywhere else, retries,
-relay-vs-direct double delivery, and device reboots are fully idempotent.
+relay-vs-direct double delivery, device reboots, and racing devices are
+fully idempotent.
+
+**Known v1 limitation, stated explicitly rather than silently accepted:**
+step 2a's claim is permanent once won by a device, so a single
+physical/web-UI device that legitimately wants to print the *same* job a
+second time (not a race — a deliberate reprint from that one device) is
+also superseded. Reprinting is still possible via the admin console
+(`received_via="admin"` is exempt from the claim entirely — an
+authenticated human action through a separate, trusted channel, not the
+unattended device race this exists for). Acceptable for a
+personal/small-household scale project; see `docs/security.md`.
 
 ## Deep sleep / wake sequence (firmware)
 
@@ -197,6 +219,19 @@ Implements the task exactly as specified:
    `armPowerButtonWakeup()` + `armWakeOnPins()` (RTC alarm pin, if a timed
    wake is configured) → `deepSleep()`.
 
+The RTC alarm target itself comes from `main.cpp`'s
+`nextWakeIntervalSeconds()`, which already folds calendar-driven near-wakes
+(an upcoming event's start/end reminder) into the default hourly cadence.
+An active Pomodoro session (`docs/planner.md`) joins that same decision:
+`PomodoroSession::secondsUntilNextCheckpoint()` is a pure function
+composed in via `std::min` alongside the calendar result, so the device
+wakes at whichever is sooner — a checkpoint redraw or the regular sync
+window — rather than running a second, independent wake timer. This is
+deliberately a **checkpoint** cadence (every few minutes, configurable),
+not a live tick: the device has no continuously-updating display mode, and
+a Pomodoro countdown is no exception to "wakes only on button press or its
+own RTC timer."
+
 Between wake and sleep, if the user is actively interacting with the Print
 Inbox UI (paging, approving), the sync sequence above only runs once at
 boot; further approvals during the session are appended to the
@@ -205,6 +240,66 @@ the *next* wake, keeping Wi-Fi off for the rest of the interactive session —
 "use deep sleep aggressively" and "the X4 does not need to be remotely
 woken" both hold: nothing above requires an inbound connection to the X4 at
 any point.
+
+## Landscape-strip reading mode
+
+The X4's panel is 800x480 (landscape), but most print jobs are portrait
+documents — fitting a whole portrait page into that box
+(`xtc_writer.prepare_page_image()`, the default `RenderMode.FIT_PAGE`) is
+bound by the panel's *shorter* 480px dimension, wasting most of the 800px
+width as unused margin. `xtc_writer.prepare_landscape_strip_images()`
+(`RenderMode.LANDSCAPE_STRIPS`) offers an alternative: render each source
+page at a scale where its width maps to the panel's 480px dimension, slice
+the result into consecutive panel-width-tall chunks, and pre-rotate each
+one 90 degrees — so reading it means physically turning the device
+sideways, but every strip uses the panel's full 800px dimension as reading
+length instead of being bound by the shorter one.
+
+This needed **no XTC/XTG format change** (the container already supports
+an arbitrary number of independently-sized pages, see
+`docs/xtc-format.md`) and **no firmware rendering change** (each strip is
+already exactly panel-sized and correctly oriented, so
+`XtcReader::renderPageToFramebuffer()`'s existing raw-copy fast path
+handles it — firmware never scales or rotates anything itself). The
+rotation direction (`Image.ROTATE_270` in `xtc_writer.py`) is a best-guess
+convention, not verified against real hardware — there is no IMU on the X4
+(BoardConfig's IMU capability is X3/Sticky-only) and no way to confirm
+which physical edge holds the buttons once the device is turned sideways
+without an actual unit; it's isolated to one call site for a trivial fix
+if wrong.
+
+`ipp_server.py`'s `_ingest_document()` **always attempts both renderings**
+for every job — the Pi generates a landscape-strip variant alongside the
+normal one, not on request. A landscape-conversion failure (e.g. a page
+shape needing more strips than `prepare_landscape_strip_images`'s
+`max_strips` guard allows) is logged and degrades to "no landscape variant
+for this job," same as a thumbnail-generation failure — it never blocks
+ingestion, since the normal rendering already succeeded. The second XTC
+file is tracked by four more `jobs` columns
+(`xtc_landscape_path`/`_bytes`/`_sha256`/`_page_count`, added via the same
+`_ensure_column()` migration pattern `thumbnail_path` established), empty
+path meaning "none" — the X4-side `JobStore` mirrors the same four fields
+on `JobEntry`.
+
+This doubles per-job Pi conversion time and X4 SD storage — an explicit,
+known tradeoff (the user's own choice over two other designs: a
+per-device default, or a second IPP printer queue) rather than an
+oversight. The wake sequence's steps 3-5 above extend accordingly: the
+job-listing manifest (`docs/protocol.md` §1.1) includes the landscape
+variant's hash/size/page-count only when one exists, `SyncManager`
+downloads and verifies it as a second file (`/inbox/<job_id>_l.xtc`)
+**all-or-nothing** with the normal one — a job only becomes visible
+on-device once every variant the manifest advertised is fully verified on
+SD — and a single `POST /jobs/{id}/ack` covers both hashes at once
+(§1.3), never a separate per-variant delivery state.
+
+On-device, the reader screen (`InboxUI.cpp`) defaults to the normal view
+for every freshly opened document; the action menu (opened via the page
+counter) gains a "View: Landscape"/"View: Portrait" toggle row, shown only
+for jobs that have a landscape variant, which reopens the same document
+from the other file and resets to its own page 1 — there's no attempt to
+map "roughly the same spot" between the two renderings, since they don't
+share a page correspondence.
 
 ## On-device Web UI (opt-in)
 
@@ -235,6 +330,81 @@ easy reach, or (hotspot mode) away from any known network entirely.
   periodic status poll counts as activity, an idle one doesn't, and
   `goToSleep()` defensively stops the web UI before every deep sleep
   regardless of how it was left running.
+- **Optional hotspot NAT bridging, off by default.** Today, Hotspot mode
+  is a fully isolated SoftAP — a phone that joins it can only reach the
+  device's own local pages, with no path to the Pi (see "On-device Web UI
+  full-document preview" below on why that link is station-mode-only). A
+  separate, still-opt-in `AppSettings.hotspotNatBridgeEnabled` toggle
+  (default off) lets a phone on the hotspot also reach the Pi/internet by
+  concurrently joining a known network as STA alongside the AP. This is a
+  broadened exception to "the X4 never accepts inbound connections," on
+  top of the Web UI's own exception above — see `docs/security.md` "On-
+  device Web UI" for the tradeoff (a bridged hotspot client can reach the
+  home LAN, not just the device itself) and why it stays default-off.
+
+### Direct upload
+
+The Web UI's "Upload" button (`ui/pages/joblist.html`) lets a phone create
+a real print job straight on the X4 — reachable in both Web UI modes
+(hotspot and station), and working with **no Pi reachable at all** at the
+moment of upload, which every other job-creation path in this project
+requires. Images only (JPEG/PNG) for v1, not PDFs. Three steps, in order:
+
+1. **Phone → X4, client-side encode.** The browser reads the picked image,
+   letterbox-resizes it onto an 800×480 canvas (contain, aspect-preserved,
+   centered, white background — matching `xtc_writer.prepare_page_image`'s
+   own algorithm exactly so a locally-encoded page looks the same as a
+   Pi-converted one), extracts grayscale pixels, and hands them to
+   `tools/xtc-wasm/xtc_encoder.cpp` (compiled to WASM, embedded the same
+   way the existing decoder is — see "On-device Web UI" above) — a third
+   independent implementation of the XTC write side, checked against the
+   same `xtc/XtcFormat.h` constants the Pi's `xtc_writer.py` and this
+   firmware's own reader already agree on. The result POSTs to
+   `WebUiServer`'s `/api/upload/xtc`, which streams it to SD and creates a
+   normal `JobEntry` (`store::JobIndex`) — readable/approvable immediately,
+   exactly like a Pi-synced job.
+2. **Phone → X4, second request.** The *original* image bytes (needed
+   later for real print-quality CUPS output — the XTC file is a lossy
+   1bpp e-paper rendering, not print stock) POST to `/api/upload/original`,
+   which streams them to a second SD file and sets the `JobEntry`'s
+   `originalPending = true`. A failure here degrades gracefully: the job
+   still exists and is readable/keepable from step 1, it just can never
+   become a real print until the user retries the whole upload (no
+   partial-upload recovery in v1).
+3. **X4 → Pi, on the next real sync.** `SyncManager::uploadPendingOriginals()`
+   (called from `runFullSync()` **before** `drainApprovalOutbox()` — this
+   ordering is the whole trick, see below) hands any `originalPending`
+   job's original bytes to `POST /devices/{device_id}/jobs/{job_id}`
+   (`docs/protocol.md` §1.7) under the **X4's own job_id** — the Pi's
+   `convert.ingest_document()` runs the exact same conversion pipeline an
+   IPP-submitted job gets, and the row lands under the id the device
+   already has a Print/Keep/Delete approval queued against in its local
+   `ApprovalOutbox`. Once uploaded successfully, the X4 clears
+   `originalPending` and deletes the local original file — the Pi is now
+   the durable owner of it, same as every other job's original.
+
+The design's key property: after step 3 succeeds, **no new code runs the
+actual print** — the job now exists in the Pi's `jobs` table under the id
+the device already queued an approval against, so the *existing*
+`drainApprovalOutbox()` → `POST /approvals` → `apply_approval()` →
+`submit_to_cups()` path just works, unchanged. The only upload-specific
+sync logic is "upload the original first, and never sync an approval for
+a job whose original hasn't landed on the Pi yet" — one guard line in
+`drainApprovalOutbox()` that skips any outbox entry whose job is still
+`originalPending`. This also means a locally-created job can never be
+prematurely forwarded through the relay while away from home: the upload
+step only ever runs against a directly-reachable Pi (`net::Endpoint::Pi`),
+matching the existing "relay never sees document bytes" invariant — if
+only the relay is reachable, both the upload and the guarded approval
+simply wait for a real Pi connection.
+
+**Multiple X4s.** No direct X4-to-X4 link exists (no ESP-NOW, no ad-hoc
+Wi-Fi peering) — each device only ever learns about another device's
+locally-created job on its own next real Pi sync, not instantly from the
+peer. What *is* handled: two devices independently deciding to Print the
+*same* job before either has synced. See "Idempotent approval application"
+above and `docs/protocol.md` §1.4's `superseded` status for how the Pi
+guarantees that never becomes two physical prints.
 
 ### On-device Web UI full-document preview
 
@@ -262,7 +432,7 @@ extension of it:
   check every other admin-console route already uses; the browser's own
   native password prompt handles it, so neither the X4 nor this page needs
   any client-side auth code for it. This only works at all when the Pi
-  owner has set an admin password (`XTEINK_ADMIN_PASSWORD`) — if not, the
+  owner has set an admin password (`FOCUSINK_ADMIN_PASSWORD`) — if not, the
   link is simply never shown (see below), the same "empty disables"
   pattern the admin console and relay already use.
 - **Wired at pairing time, not discovered at runtime.** `pair_device.py`
@@ -333,6 +503,49 @@ gating:
   empty) on any network error, non-2xx status, or CORS failure — same
   "worst case is nothing shown" rule as the thumbnails.
 
+### Planner page
+
+`GET /planner` (`WebUiServer.cpp`) is a third page alongside `login.html`/
+`joblist.html`, reusing the exact same PIN/session-cookie gate and
+idle-timeout teardown — no new auth code, no new security surface class.
+It renders the day's merged tasks + calendar events
+(`GET /api/planner/tasks?date=YYYY-MM-DD`, reading `store::PlannerStore`
+and `calendar::CalendarSync`'s cached events directly on-device, no
+round-trip to the Pi needed for this view) as genuinely color-coded cards
+using `docs/design-system.md`'s tokens — deliberately different coding
+from the native e-paper Timeline screen's icon+dither-pattern approach,
+since this surface (a phone browser) isn't limited to 1bpp. See
+`docs/planner.md` for the full feature writeup, including why the native
+screens and this page use two different visual codings for the same eight
+categories.
+
+### On-device diagnostics panel
+
+The job-list page also has a collapsible diagnostics panel (`GET
+/api/diag`, `WebUiServer::handleApiDiag()`) showing storage, battery, and
+memory state — read-only, no new trust boundary (same session-cookie gate
+as every other Web UI route). Every field follows the same "omit rather
+than show a wrong or misleading value" rule used everywhere else in this
+feature:
+
+- **Storage.** `sd_total_bytes`/`sd_free_bytes` from `SDCardManager`'s
+  `sdTotalBytes()`/`sdUsedBytes()` (subtracted here; clamped to 0 rather
+  than underflowing if used ever exceeds total).
+- **Battery.** `BatteryMonitor::readStatus()` (FreeInk SDK) reports
+  `battery_percent`/`battery_millivolts`, each included only when that
+  reading's own `percentageKnown`/`millivoltsKnown` flag is true.
+  Charging status is deliberately never surfaced: X4's `BoardConfig`
+  profile has no charge-status pin wired (`batteryChargeStatus =
+  PIN_UNASSIGNED`), so `chargingKnown` would always read false — showing
+  it would look like "definitely not charging" instead of "unknown."
+- **Memory.** `heap_free_bytes` from `freeink::MemoryManager::instance().freeBytes()`
+  — always present (no hardware-dependent unknown case here).
+
+`joblist.html` hides each row individually when its backing field is
+absent from the response, rather than showing a placeholder — a device
+built without `BatteryMonitor` wired up, for instance, just shows Storage
+and Free memory with no Battery row, not a broken or zeroed one.
+
 ## Memory budget (ESP32-C3, firmware)
 
 The C3 has 400KB SRAM total, shared between the Wi-Fi/TLS stack, FreeRTOS,
@@ -343,7 +556,7 @@ the FreeInk display framebuffer, and application code. Concretely:
 | Display framebuffer | 48,000 B (800x480 / 8, single-buffer mode, `-DEINK_DISPLAY_SINGLE_BUFFER_MODE=1`) | Fixed, owned by FreeInk |
 | XTC page render | 2,048 B chunk buffer | `XtcReader` streams file→framebuffer in fixed chunks, §`docs/xtc-format.md` |
 | SD download | 2,048 B chunk buffer | `SyncClient::downloadJobToSd()` streams HTTP→SD in fixed chunks; SHA-256 state is ~200 B, not proportional to file size |
-| Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~4KB typical) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
+| Job/outbox index | Bounded by `MAX_INBOX_JOBS` (64) and `MAX_OUTBOX_ENTRIES` (32) fixed-capacity JSON arrays, loaded once at boot (~6KB typical, up from ~4KB before the landscape-strip variant fields added roughly 120 bytes/`JobEntry`) | `JobStore`/`ApprovalOutbox` refuse to grow past these caps; the UI surfaces "inbox full, archive or delete something" rather than allocating unbounded state |
 | Wi-Fi + TLS (esp_http_client/mbedTLS) | ~40-60KB while connected | Only resident during the sync window (steps 2-8 above); torn down before deep sleep |
 | Web UI (Wi-Fi/SoftAP + `WebServer`, no TLS) | Similar order of magnitude to the sync-window Wi-Fi row above, minus the TLS overhead | Optional — only resident while the "On-device Web UI" feature is manually toggled on; torn down by the same idle timer as the rest of the UI, never during normal (button/timer-wake) operation |
 

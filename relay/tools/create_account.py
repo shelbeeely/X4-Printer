@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Creates a relay account (one per household/Pi) and prints the
-account_id + token to hand to pi-server's XTEINK_RELAY_ACCOUNT_ID /
-XTEINK_RELAY_ACCOUNT_TOKEN config and to pair_device.py for each X4 in that
+account_id + token to hand to pi-server's FOCUSINK_RELAY_ACCOUNT_ID /
+FOCUSINK_RELAY_ACCOUNT_TOKEN config and to pair_device.py for each X4 in that
 household. The relay is self-hosted by the same person who owns the Pi in
 this prototype, so account creation is an operator-run CLI, not a public
 signup flow — see docs/relay.md for scaling this to a shared/multi-tenant
@@ -37,10 +37,10 @@ def main() -> int:
     print(f"account_id:    {account_id}")
     print(f"account_token: {token}")
     print()
-    print("Add to pi-server's environment (see pi-server/install/xteink-print-server.service):")
-    print(f"  XTEINK_RELAY_ACCOUNT_ID={account_id}")
-    print(f"  XTEINK_RELAY_ACCOUNT_TOKEN={token}")
-    print(f"  XTEINK_RELAY_URL=https://<this-relay-host>:{config.port}")
+    print("Add to pi-server's environment (see pi-server/install/focusink-server.service):")
+    print(f"  FOCUSINK_RELAY_ACCOUNT_ID={account_id}")
+    print(f"  FOCUSINK_RELAY_ACCOUNT_TOKEN={token}")
+    print(f"  FOCUSINK_RELAY_URL=https://<this-relay-host>:{config.port}")
     return 0
 
 

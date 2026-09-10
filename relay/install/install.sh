@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the Xteink relay on any small Debian-family host (a $5/mo VPS is
+# Installs the Focusink relay on any small Debian-family host (a $5/mo VPS is
 # plenty — see docs/relay.md). Idempotent: safe to re-run after `git pull`.
 
 set -euo pipefail
@@ -11,9 +11,9 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
-INSTALL_DIR="/opt/xteink-relay"
-DATA_DIR="/var/lib/xteink-relay"
-SERVICE_USER="xteink-relay"
+INSTALL_DIR="/opt/focusink-relay"
+DATA_DIR="/var/lib/focusink-relay"
+SERVICE_USER="focusink-relay"
 
 echo "==> Installing system packages"
 apt-get update -qq
@@ -44,25 +44,25 @@ mkdir -p "$DATA_DIR"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR" "$INSTALL_DIR"
 
 echo "==> Installing systemd unit"
-install -m 0644 "$SOURCE_DIR/install/xteink-relay.service" /etc/systemd/system/xteink-relay.service
+install -m 0644 "$SOURCE_DIR/install/focusink-relay.service" /etc/systemd/system/focusink-relay.service
 systemctl daemon-reload
-systemctl enable xteink-relay.service
-systemctl restart xteink-relay.service
+systemctl enable focusink-relay.service
+systemctl restart focusink-relay.service
 
 echo
 echo "============================================================"
-echo " Xteink relay installed."
+echo " Focusink relay installed."
 echo "============================================================"
 echo
 echo "TLS: this unit runs the relay in plaintext by default. Either:"
-echo "  (a) point XTEINK_RELAY_TLS_CERT/XTEINK_RELAY_TLS_KEY at a real"
+echo "  (a) point FOCUSINK_RELAY_TLS_CERT/FOCUSINK_RELAY_TLS_KEY at a real"
 echo "      certificate (e.g. certbot) and restart the service, or"
 echo "  (b) put nginx/caddy in front on 443 and reverse-proxy to"
 echo "      127.0.0.1:8843 — recommended, see docs/relay.md."
-echo "Do not expose XTEINK_RELAY_PORT to the internet without one of the two."
+echo "Do not expose FOCUSINK_RELAY_PORT to the internet without one of the two."
 echo
 echo "Create an account for your household:"
 echo "  sudo -u $SERVICE_USER $INSTALL_DIR/.venv/bin/python $INSTALL_DIR/tools/create_account.py --name \"My Household\""
 echo
-echo "Then configure pi-server (XTEINK_RELAY_URL/ACCOUNT_ID/ACCOUNT_TOKEN)"
+echo "Then configure pi-server (FOCUSINK_RELAY_URL/ACCOUNT_ID/ACCOUNT_TOKEN)"
 echo "and re-pair devices so they pick up the relay fields — see docs/relay.md."

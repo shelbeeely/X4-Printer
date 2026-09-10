@@ -17,7 +17,7 @@ model.
 [Phone, LAN or X4's own hotspot] --HTTP, fresh PIN + session cookie, no TLS--> [X4: ui/WebUiServer.cpp]
 ```
 
-## IPP listener (`pi-server/xteink_print_server/ipp_server.py`)
+## IPP listener (`pi-server/focusink_server/ipp_server.py`)
 
 **Unauthenticated by design**, matching every consumer/home network
 printer (real hardware printers with IPP/AirPrint accept jobs from anyone
@@ -87,11 +87,35 @@ the physical UI.
   (`firmware/src/store/ApprovalOutbox.h`), the exact same durable-outbox
   path the physical buttons use, so it inherits the same
   `docs/protocol.md` §3 guarantees once it eventually syncs to the Pi.
+- **Optional NAT bridging for Hotspot mode, off by default and a real,
+  broadened exception to "the X4 never accepts inbound connections."**
+  `AppSettings.hotspotNatBridgeEnabled` (default off) lets a phone joined
+  to the device's own SoftAP also reach the Pi/internet. `net::NatBridge`
+  (`firmware/src/net/NatBridge.h`/`.cpp`) brings up a concurrent STA
+  connection to a known network alongside the already-running SoftAP
+  (`WifiManager::connectKeepingAp()`, `WIFI_AP_STA` — never replaces the
+  AP the way a plain STA-mode connect would) and enables real transparent
+  NAT between the two interfaces via lwIP's NAPT (`lwip/lwip_napt.h`,
+  `ip_napt_enable()`) — the same mechanism `esp32_nat_router` itself uses.
+  This project's pinned Arduino-ESP32 build (pioarduino
+  `platform-espressif32`, core 3.3.7 / ESP-IDF 5.5) does ship NAPT enabled
+  (`CONFIG_LWIP_IP_FORWARD`/`CONFIG_LWIP_IPV4_NAPT`, verified against the
+  actual toolchain and confirmed real symbols in `liblwip.a`) — general
+  routing, not a scoped single-port forward. Accepted tradeoff, stated
+  plainly: a client on the bridged hotspot can reach whatever the device's
+  own saved Wi-Fi network can reach — the home LAN, not just the X4 itself
+  — which is a materially larger exposure than the isolated-hotspot
+  default. This is why the toggle defaults off and sits behind the Web
+  UI's own opt-in toggle (two explicit steps, not one). See
+  `docs/planner.md` for why this piece of esp32_nat_router's design was
+  borrowed at all (it isn't part of the planner/Pomodoro feature itself)
+  and `docs/architecture.md`'s "On-device Web UI (opt-in)" for the
+  mechanism.
 
 ## Admin web console (`admin_api.py`)
 
 - **Disabled by default.** `server.py` only starts the listener if
-  `XTEINK_ADMIN_PASSWORD` is set — an empty password means no listener at
+  `FOCUSINK_ADMIN_PASSWORD` is set — an empty password means no listener at
   all, not an open one. There's no separate "enable" flag to forget.
 - **Auth is a single shared HTTP Basic password**, compared with the same
   constant-time comparison (`util.constant_time_eq`) the sync API uses for
@@ -101,7 +125,7 @@ the physical UI.
   (`admin_settings.json` is not used for it; only the fields listed in
   `config.RUNTIME_OVERRIDABLE_FIELDS` are), so anyone who can read the
   systemd unit or process environment can read it — same exposure as
-  `XTEINK_RELAY_ACCOUNT_TOKEN` today.
+  `FOCUSINK_RELAY_ACCOUNT_TOKEN` today.
 - **TLS is reused, not separate**: if `tls_cert`/`tls_key` exist (the same
   cert `sync_api.py` uses), the admin listener wraps its socket in TLS
   too; otherwise it logs a warning and serves plaintext, same fallback
@@ -195,7 +219,7 @@ the physical UI.
 
 `submit_to_cups()` only ever invokes `lp -d <config.cups_queue>` — the
 queue name comes from server configuration
-(`XTEINK_CUPS_QUEUE`), never from request data, so no approval payload can
+(`FOCUSINK_CUPS_QUEUE`), never from request data, so no approval payload can
 redirect a print to an arbitrary destination or inject `lp` arguments (the
 file path is passed as a single argv element via `subprocess.run([...])`,
 never through a shell, so there is no shell-injection surface even though

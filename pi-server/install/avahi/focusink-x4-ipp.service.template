@@ -1,0 +1,56 @@
+<?xml version="1.0" standalone="no"?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!--
+  mDNS/DNS-SD advertisement for Focusink's virtual IPP printer, fronting
+  for the real Xteink X4 e-paper device (focusink_server/ipp_server.py).
+  This is what makes "Focusink" show up automatically in Windows/macOS/
+  Linux/Android/iOS print dialogs without any driver install — the same
+  _ipp._tcp + _printer._tcp records a real AirPrint/IPP-Everywhere
+  hardware printer publishes.
+
+  install/install.sh renders this template (substituting @@IPP_PORT@@ and
+  @@PRINTER_NAME@@) to /etc/avahi/services/focusink-x4-ipp.service. Do not
+  edit the rendered file directly — edit this template and re-run
+  install.sh, or the next install/upgrade will overwrite your change.
+-->
+<service-group>
+  <name replace-wildcards="yes">@@PRINTER_NAME@@ @ %h</name>
+
+  <service>
+    <type>_ipp._tcp</type>
+    <port>@@IPP_PORT@@</port>
+    <txt-record>txtvers=1</txt-record>
+    <txt-record>qtotal=1</txt-record>
+    <txt-record>rp=ipp/print</txt-record>
+    <txt-record>ty=@@PRINTER_NAME@@</txt-record>
+    <txt-record>adminurl=http://%h/</txt-record>
+    <txt-record>note=Focusink print inbox (via Raspberry Pi)</txt-record>
+    <txt-record>product=(Focusink)</txt-record>
+    <txt-record>pdl=application/pdf,image/jpeg,image/png</txt-record>
+    <txt-record>Color=F</txt-record>
+    <txt-record>Duplex=F</txt-record>
+    <txt-record>Copies=T</txt-record>
+    <txt-record>Bind=F</txt-record>
+    <txt-record>Staple=F</txt-record>
+    <txt-record>Punch=F</txt-record>
+    <txt-record>Sort=F</txt-record>
+    <txt-record>Scan=F</txt-record>
+    <txt-record>Fax=F</txt-record>
+    <txt-record>PaperMax=legal-A4</txt-record>
+    <txt-record>URF=none</txt-record>
+    <txt-record>UUID=@@PRINTER_UUID@@</txt-record>
+    <txt-record>TLS=1.2</txt-record>
+    <txt-record>priority=50</txt-record>
+  </service>
+
+  <!-- Legacy LPD-style discovery for older clients that only look for
+       _printer._tcp; harmless to also publish, no LPD daemon required. -->
+  <service>
+    <type>_printer._tcp</type>
+    <port>@@IPP_PORT@@</port>
+    <txt-record>txtvers=1</txt-record>
+    <txt-record>ty=@@PRINTER_NAME@@</txt-record>
+    <txt-record>product=(Focusink)</txt-record>
+    <txt-record>rp=ipp/print</txt-record>
+  </service>
+</service-group>

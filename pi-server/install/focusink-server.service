@@ -1,0 +1,67 @@
+[Unit]
+Description=Focusink server (IPP receiver, sync API, relay client)
+After=network-online.target cups.service avahi-daemon.service
+Wants=network-online.target
+Requires=cups.service
+
+[Service]
+Type=simple
+User=focusink
+Group=lp
+ExecStart=/opt/focusink-server/.venv/bin/python -m focusink_server.server
+WorkingDirectory=/opt/focusink-server
+Restart=on-failure
+RestartSec=5
+
+# --- Storage layout -------------------------------------------------------
+Environment=FOCUSINK_DATA_DIR=/var/lib/focusink-server
+
+# --- IPP listener (what OS print dialogs talk to) --------------------------
+Environment=FOCUSINK_IPP_HOST=0.0.0.0
+Environment=FOCUSINK_IPP_PORT=6310
+Environment=FOCUSINK_PRINTER_NAME=Focusink
+Environment=FOCUSINK_RENDER_DPI=150
+
+# --- X4 sync API (device <-> Pi, TLS) --------------------------------------
+Environment=FOCUSINK_SYNC_HOST=0.0.0.0
+Environment=FOCUSINK_SYNC_PORT=8443
+Environment=FOCUSINK_TLS_CERT=/var/lib/focusink-server/tls/server.crt
+Environment=FOCUSINK_TLS_KEY=/var/lib/focusink-server/tls/server.key
+
+# --- X4 panel geometry ------------------------------------------------------
+Environment=FOCUSINK_PANEL_WIDTH=800
+Environment=FOCUSINK_PANEL_HEIGHT=480
+
+# --- Physical printer forwarding --------------------------------------------
+# Set this to the CUPS queue name for your real printer, e.g. `lpstat -p`
+# after running install.sh's CUPS setup step.
+Environment=FOCUSINK_CUPS_QUEUE=
+Environment=FOCUSINK_LP_BINARY=/usr/bin/lp
+
+# --- Cloud relay (optional; leave FOCUSINK_RELAY_URL empty to disable) -------
+# Fill these in with the output of relay/tools/create_account.py if you want
+# remote (away-from-home) approval support.
+Environment=FOCUSINK_RELAY_URL=
+Environment=FOCUSINK_RELAY_ACCOUNT_ID=
+Environment=FOCUSINK_RELAY_ACCOUNT_TOKEN=
+Environment=FOCUSINK_RELAY_POLL_INTERVAL=20
+Environment=FOCUSINK_RELAY_ALLOW_DOCUMENT_SYNC=false
+
+Environment=FOCUSINK_RETENTION_DAYS=30
+Environment=FOCUSINK_LOG_LEVEL=INFO
+
+# --- Admin web console (optional; leave FOCUSINK_ADMIN_PASSWORD empty to
+# disable it entirely — no listener starts without a password set) ---------
+Environment=FOCUSINK_ADMIN_HOST=0.0.0.0
+Environment=FOCUSINK_ADMIN_PORT=8090
+Environment=FOCUSINK_ADMIN_PASSWORD=
+
+# --- Hardening ----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/focusink-server
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

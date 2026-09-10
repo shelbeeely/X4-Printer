@@ -22,13 +22,13 @@ usage patterns) versus written from scratch.
   referenced for its from-scratch IPP/1.1 wire-protocol implementation
   (attribute encoding, Get-Printer-Attributes response shape, chunked HTTP
   body handling) against a plain http.server, which
-  pi-server/xteink_print_server/ipp_server.py reimplements independently
+  pi-server/focusink_server/ipp_server.py reimplements independently
   for this project's narrower needs (see docs/architecture.md for what
   differs).
 
 - phrozen/xtx (https://github.com/phrozen/xtx) — the reference for the
   XTC/XTG/XTCH byte-layout specification (docs/xtc-format.md distills the
   subset this project uses). Both this project's Python encoder
-  (pi-server/xteink_print_server/xtc_writer.py) and its C++ decoder
+  (pi-server/focusink_server/xtc_writer.py) and its C++ decoder
   (firmware/src/xtc/XtcFormat.h) are from-scratch implementations against
   that spec — neither links or vendors the xtx Go module.

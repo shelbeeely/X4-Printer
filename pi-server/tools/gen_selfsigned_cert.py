@@ -23,12 +23,12 @@ def _default_hostname() -> str:
     try:
         return socket.gethostname()
     except OSError:
-        return "xteink-print-server"
+        return "focusink-server"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out-dir", type=Path, default=Path("/var/lib/xteink-print-server/tls"))
+    parser.add_argument("--out-dir", type=Path, default=Path("/var/lib/focusink-server/tls"))
     parser.add_argument("--hostname", default=_default_hostname())
     parser.add_argument("--ip", action="append", default=[], help="Additional IP SAN (repeatable)")
     parser.add_argument("--days", type=int, default=3650)

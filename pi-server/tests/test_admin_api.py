@@ -7,18 +7,19 @@ import urllib.request
 
 import pytest
 
-from xteink_print_server.admin_api import AdminApiServer
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.relay_client import RelayClient
-from xteink_print_server.util import hash_token, sha256_file
+from focusink_server import planner
+from focusink_server.admin_api import AdminApiServer
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.relay_client import RelayClient
+from focusink_server.util import hash_token, sha256_file
 
 DEVICE_ID = "dev-test1"
 DEVICE_TOKEN = "supersecrettoken"
 ADMIN_PASSWORD = "let-me-in"
 
 
-def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False) -> str:
+def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False, with_landscape=False) -> str:
     xtc_path = config.xtc_dir / "job1.xtc"
     xtc_path.write_bytes(b"XTC" + b"\x00" * 100)
     original_path = config.originals_dir / "job1.pdf"
@@ -28,7 +29,16 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False)
         thumb = config.thumbnails_dir / "job1.jpg"
         thumb.write_bytes(b"\xff\xd8\xff-fake-jpeg-bytes")
         thumbnail_path = str(thumb)
-    return db.insert_job(
+    xtc_landscape_path = ""
+    xtc_landscape_bytes = 0
+    xtc_landscape_sha256 = ""
+    if with_landscape:
+        landscape_path = config.xtc_dir / "job1_landscape.xtc"
+        landscape_path.write_bytes(b"XTC" + b"\x00" * 200)
+        xtc_landscape_path = str(landscape_path)
+        xtc_landscape_bytes = landscape_path.stat().st_size
+        xtc_landscape_sha256 = sha256_file(landscape_path)
+    job_id, _is_new = db.insert_job(
         title=title,
         source="ipp",
         original_path=str(original_path),
@@ -39,7 +49,12 @@ def _insert_job(db: Database, config: Config, title="Doc", with_thumbnail=False)
         xtc_sha256=sha256_file(xtc_path),
         page_count=1,
         thumbnail_path=thumbnail_path,
+        xtc_landscape_path=xtc_landscape_path,
+        xtc_landscape_bytes=xtc_landscape_bytes,
+        xtc_landscape_sha256=xtc_landscape_sha256,
+        xtc_landscape_page_count=2 if with_landscape else 0,
     )
+    return job_id
 
 
 @pytest.fixture
@@ -247,6 +262,19 @@ def test_job_action_purge_removes_thumbnail_when_present(running_admin_api):
     assert not Path(row["thumbnail_path"]).exists()
 
 
+def test_job_action_purge_removes_landscape_variant_when_present(running_admin_api):
+    base, db, config = running_admin_api
+    job_id = _insert_job(db, config, with_landscape=True)
+    row = db.get_job(job_id)
+    from pathlib import Path
+
+    assert Path(row["xtc_landscape_path"]).exists()
+
+    resp = json.loads(_post(f"{base}/jobs/{job_id}/action", {"action": "purge"}).read())
+    assert resp["status"] == "purged"
+    assert not Path(row["xtc_landscape_path"]).exists()
+
+
 def test_job_action_unknown_action_rejected(running_admin_api):
     base, db, config = running_admin_api
     job_id = _insert_job(db, config)
@@ -431,5 +459,188 @@ def test_static_index_served(running_admin_api):
     root = base.rsplit("/api/", 1)[0]
     resp = _get(f"{root}/")
     body = resp.read().decode()
-    assert "X4 Print Inbox" in body
+    assert "Focusink" in body
     assert resp.headers["Content-Type"].startswith("text/html")
+
+
+# -- calendars & Wi-Fi (synced to every device, docs/protocol.md §1.6) -------
+
+
+def test_add_and_list_calendars(running_admin_api):
+    base, _db, _config = running_admin_api
+    resp = json.loads(_post(f"{base}/calendars", {"url": "https://example.com/a.ics", "label": "Work"}).read())
+    assert "id" in resp
+
+    listed = json.loads(_get(f"{base}/calendars").read())
+    assert len(listed["calendars"]) == 1
+    assert listed["calendars"][0]["url"] == "https://example.com/a.ics"
+    assert listed["calendars"][0]["label"] == "Work"
+    assert listed["max"] == 4
+
+
+def test_add_calendar_requires_url(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/calendars", {"label": "No URL"})
+    assert exc.value.code == 400
+
+
+def test_add_calendar_enforces_max(running_admin_api):
+    base, _db, _config = running_admin_api
+    for i in range(4):
+        _post(f"{base}/calendars", {"url": f"https://example.com/{i}.ics", "label": ""})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/calendars", {"url": "https://example.com/one-too-many.ics", "label": ""})
+    assert exc.value.code == 400
+
+
+def test_delete_calendar(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(_post(f"{base}/calendars", {"url": "https://example.com/a.ics", "label": ""}).read())
+    _post(f"{base}/calendars/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/calendars").read())
+    assert listed["calendars"] == []
+
+
+def test_add_and_list_wifi_networks(running_admin_api):
+    base, _db, _config = running_admin_api
+    resp = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "hunter2"}).read())
+    assert "id" in resp
+
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert len(listed["wifi_networks"]) == 1
+    assert listed["wifi_networks"][0]["ssid"] == "HomeWiFi"
+    assert listed["wifi_networks"][0]["password"] == "hunter2"
+    assert listed["max"] == 8
+
+
+def test_add_wifi_network_upserts_existing_ssid(running_admin_api):
+    base, _db, _config = running_admin_api
+    first = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "old"}).read())
+    second = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "new"}).read())
+    assert first["id"] == second["id"]
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert len(listed["wifi_networks"]) == 1
+    assert listed["wifi_networks"][0]["password"] == "new"
+
+
+def test_add_wifi_network_enforces_max(running_admin_api):
+    base, _db, _config = running_admin_api
+    for i in range(8):
+        _post(f"{base}/wifi-networks", {"ssid": f"Net{i}", "password": "pw"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/wifi-networks", {"ssid": "OneTooMany", "password": "pw"})
+    assert exc.value.code == 400
+
+
+def test_delete_wifi_network(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(_post(f"{base}/wifi-networks", {"ssid": "HomeWiFi", "password": "hunter2"}).read())
+    _post(f"{base}/wifi-networks/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/wifi-networks").read())
+    assert listed["wifi_networks"] == []
+
+
+# -- planner tasks + Pomodoro config (per-device) ----------------------------
+
+
+def test_list_planner_tasks_requires_date(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(f"{base}/devices/{DEVICE_ID}/planner/tasks")
+    assert exc.value.code == 400
+
+
+def test_add_and_list_planner_task(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    assert "id" in added
+
+    listed = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert len(listed["tasks"]) == 1
+    assert listed["tasks"][0]["title"] == "Standup"
+    assert listed["categories"] == list(planner.CATEGORIES)
+
+
+def test_add_planner_task_rejects_null_title(running_admin_api):
+    """A JSON null title must 400, not silently become a task literally
+    titled the string "None" (str(None))."""
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": None, "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        )
+    assert exc.value.code == 400
+
+
+def test_add_planner_task_rejects_unknown_category(running_admin_api):
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "X", "category": "Not-A-Category", "start_time": "09:00", "end_time": "09:15"},
+        )
+    assert exc.value.code == 400
+
+
+def test_delete_planner_task(running_admin_api):
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    _post(f"{base}/devices/{DEVICE_ID}/planner/tasks/{added['id']}/delete", {})
+    listed = json.loads(_get(f"{base}/devices/{DEVICE_ID}/planner/tasks?date=2026-09-04").read())
+    assert listed["tasks"] == []
+
+
+def test_delete_planner_task_scoped_to_device(running_admin_api):
+    """A task belonging to a different device_id must 404, not delete --
+    same scoping guarantee sync_api.py's device-facing complete endpoint
+    enforces (docs/protocol.md §1.8)."""
+    base, _db, _config = running_admin_api
+    added = json.loads(
+        _post(
+            f"{base}/devices/{DEVICE_ID}/planner/tasks",
+            {"date": "2026-09-04", "title": "Standup", "category": "Work", "start_time": "09:00", "end_time": "09:15"},
+        ).read()
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/devices/dev-other/planner/tasks/{added['id']}/delete", {})
+    assert exc.value.code == 404
+
+
+def test_pomodoro_config_defaults_and_round_trips(running_admin_api):
+    base, _db, _config = running_admin_api
+    defaults = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert defaults == {
+        "work_minutes": 25,
+        "break_minutes": 5,
+        "long_break_minutes": 15,
+        "sessions_before_long_break": 4,
+        "checkpoint_minutes": 5,
+    }
+
+    updated = json.loads(_post(f"{base}/devices/{DEVICE_ID}/pomodoro/config", {"work_minutes": 30}).read())
+    assert updated["work_minutes"] == 30
+    assert updated["break_minutes"] == 5  # unset fields merge onto the previous config, not the defaults
+
+    refetched = json.loads(_get(f"{base}/devices/{DEVICE_ID}/pomodoro/config").read())
+    assert refetched["work_minutes"] == 30
+
+
+def test_set_pomodoro_config_rejects_unknown_field(running_admin_api):
+    """An unrecognized field name must 400, not be silently dropped while
+    returning 200 with the config unchanged."""
+    base, _db, _config = running_admin_api
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(f"{base}/devices/{DEVICE_ID}/pomodoro/config", {"checkpoint_min": 10})
+    assert exc.value.code == 400

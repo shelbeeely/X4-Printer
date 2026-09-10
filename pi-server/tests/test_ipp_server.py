@@ -6,9 +6,9 @@ import urllib.request
 import pytest
 
 from tests.conftest import make_test_pdf
-from xteink_print_server.config import Config
-from xteink_print_server.db import Database
-from xteink_print_server.ipp_server import (
+from focusink_server.config import Config
+from focusink_server.db import Database
+from focusink_server.ipp_server import (
     IPP_OP_GET_PRINTER_ATTRIBUTES,
     IPP_OP_PRINT_JOB,
     IppServer,
@@ -61,7 +61,7 @@ def test_get_printer_attributes_returns_ok_and_printer_name(running_ipp_server):
         body = resp.read()
     status_code = struct.unpack(">H", body[2:4])[0]
     assert status_code == 0x0000
-    assert b"Xteink X4" in body
+    assert b"Focusink" in body
 
 
 def test_print_job_ingests_document_and_stores_original(running_ipp_server):
@@ -110,6 +110,33 @@ def test_print_job_generates_thumbnail_from_first_page(running_ipp_server):
     assert img.format == "JPEG"
     # Downscaled from the panel's 800x480, aspect ratio preserved (max_width=160).
     assert img.width <= 160
+
+
+def test_print_job_also_generates_landscape_strip_variant(running_ipp_server):
+    url, db = running_ipp_server
+    pdf_bytes = make_test_pdf(pages=2)
+    extra = _attr_str(0x49, "document-format", "application/pdf") + _attr_str(0x42, "job-name", "Landscape Test")
+    request = _ipp_request(IPP_OP_PRINT_JOB, 2, extra_attrs=extra, document=pdf_bytes)
+    req = urllib.request.Request(url, data=request, headers={"Content-Type": "application/ipp"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+    jobs = db.list_all_jobs()
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["xtc_landscape_path"], "a landscape variant should be generated for a normally-convertible document"
+    assert job["xtc_landscape_bytes"] > 0
+    assert job["xtc_landscape_sha256"]
+    assert job["xtc_landscape_page_count"] > 0
+
+    from pathlib import Path
+
+    landscape_path = Path(job["xtc_landscape_path"])
+    data = landscape_path.read_bytes()
+    assert len(data) == job["xtc_landscape_bytes"]
+    mark = struct.unpack_from("<I", data, 0)[0]
+    assert mark == 0x00435458  # "XTC\0" -- a real, distinct XTC container, not a copy of the normal one
+    assert landscape_path != Path(job["xtc_path"])
 
 
 def test_print_job_rejects_empty_document(running_ipp_server):

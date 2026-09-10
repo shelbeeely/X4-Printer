@@ -1,5 +1,5 @@
 // Host-side test: parses a real XTC file produced by the Pi's independent
-// Python encoder (pi-server/xteink_print_server/xtc_writer.py) with the
+// Python encoder (pi-server/focusink_server/xtc_writer.py) with the
 // firmware's independent C++ decoder (src/xtc/XtcFormat.h), and checks they
 // agree — this is the cross-implementation check that the two from-scratch
 // implementations described in docs/architecture.md actually speak the same
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
   std::string publisher = readFixedString(meta + 0xC0, 32);
   CHECK(title == "Fixture Document");
   CHECK(author == "Test Suite");
-  CHECK(publisher == "xteink-print-inbox");  // see docs/xtc-format.md
+  CHECK(publisher == "focusink");  // see docs/xtc-format.md
 
   uint32_t createTime = xtc::readLE32(meta + 0xF0);
   CHECK(createTime == 1737590000u);

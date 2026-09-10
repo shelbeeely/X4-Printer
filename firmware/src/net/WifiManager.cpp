@@ -7,13 +7,18 @@
 
 namespace net {
 
-bool WifiManager::connect(uint32_t timeoutMs) {
+namespace {
+
+// Shared by connect() and connectKeepingAp() -- identical scan/match/
+// connect logic, differing only in which WiFi mode is set beforehand
+// (WIFI_STA replaces any existing AP; WIFI_AP_STA preserves one).
+bool connectWithMode(wifi_mode_t mode, uint32_t timeoutMs) {
   config::WifiStore& store = config::WifiStore::instance();
   if (store.count() == 0) {
     return false;  // nothing saved yet — normal on a freshly-provisioned device
   }
 
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(mode);
   WiFi.disconnect(false);
   delay(50);
 
@@ -44,7 +49,16 @@ bool WifiManager::connect(uint32_t timeoutMs) {
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     if (millis() - start > timeoutMs) {
-      WiFi.disconnect(true);
+      if (mode == WIFI_AP_STA) {
+        // wifioff=true (the else branch) would call esp_wifi_stop() and
+        // take the just-started softAP down with it -- WifiManager owns
+        // the AP_STA -> AP teardown shape in one place (see
+        // disconnectKeepingAp()) rather than duplicating it here and in
+        // net::NatBridge.
+        WifiManager().disconnectKeepingAp();
+      } else {
+        WiFi.disconnect(true);
+      }
       return false;
     }
     delay(100);
@@ -55,6 +69,12 @@ bool WifiManager::connect(uint32_t timeoutMs) {
   return true;
 }
 
+}  // namespace
+
+bool WifiManager::connect(uint32_t timeoutMs) { return connectWithMode(WIFI_STA, timeoutMs); }
+
+bool WifiManager::connectKeepingAp(uint32_t timeoutMs) { return connectWithMode(WIFI_AP_STA, timeoutMs); }
+
 void WifiManager::disconnect() {
   // wifioff=true, eraseap=true: also clears the ESP32 WiFi driver's own NVS
   // AP record. Safe — this firmware never relies on the driver's built-in
@@ -62,6 +82,14 @@ void WifiManager::disconnect() {
   // config::WifiStore explicitly on every wake.
   WiFi.disconnect(true, true);
   WiFi.mode(WIFI_OFF);
+}
+
+void WifiManager::disconnectKeepingAp() {
+  // Mirrors the timeout branch's AP_STA -> AP transition above: drop the
+  // STA half only (wifioff=false), then restore AP-only mode so the
+  // softAP interface itself is untouched.
+  WiFi.disconnect(false);
+  WiFi.mode(WIFI_AP);
 }
 
 bool WifiManager::isConnected() const { return WiFi.status() == WL_CONNECTED; }
